@@ -80,7 +80,7 @@ Browser (HTML/JS)
 | `agents/planner.py` | Calls Claude (Opus) to produce a validated task graph from the request |
 | `agents/research.py` | Calls Claude (Sonnet) with DuckDuckGo search tool |
 | `agents/code.py` | Calls Claude (Sonnet) to write + execute Python in a subprocess sandbox |
-| `agents/summary.py` | Calls Claude (Sonnet) to synthesise prose from prior outputs |
+| `agents/summary.py` | Calls Claude (Sonnet) to synthesize prose from prior outputs |
 | `agents/aggregator.py` | Calls Claude (Sonnet) to merge all outputs into a final structured response |
 | `tools/search.py` | DuckDuckGo search wrapper (one tool, used only by ResearchAgent) |
 | `tools/executor.py` | Subprocess sandbox runner (one tool, used only by CodeAgent) |
@@ -205,11 +205,11 @@ All events share a common envelope:
 - [x] `tools/executor.py` — subprocess sandbox: run code, capture stdout/stderr, enforce timeout, clean up working dir
 
 ### Phase 2 — Agents
-- [ ] `agents/planner.py` — Claude Opus call, structured output, Pydantic validation + one retry
-- [ ] `agents/research.py` — Claude Sonnet + search tool
-- [ ] `agents/code.py` — Claude Sonnet + executor tool (writes code, executes, returns result + artifact path)
-- [ ] `agents/summary.py` — Claude Sonnet, text synthesis
-- [ ] `agents/aggregator.py` — Claude Sonnet, merge outputs into final structured result
+- [x] `agents/planner.py` — Claude Opus call, structured output, Pydantic validation + one retry
+- [x] `agents/research.py` — Claude Sonnet + search tool
+- [x] `agents/code.py` — Claude Sonnet + executor tool (writes code, executes, returns result + artifact path)
+- [x] `agents/summary.py` — Claude Sonnet, text synthesis
+- [x] `agents/aggregator.py` — Claude Sonnet, merge outputs into final structured result
 
 ### Phase 3 — Orchestrator
 - [ ] `events.py` — SSE event queue per task

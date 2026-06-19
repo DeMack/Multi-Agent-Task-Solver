@@ -132,7 +132,7 @@ Define the following agent roles:
 | **Planner** | Decomposes request into a typed task graph with agent assignments | None (structured output) |
 | **ResearchAgent** | Retrieves information from external sources | Web search API (one tool) |
 | **CodeAgent** | Writes and executes Python code (data analysis, chart generation) | Python sandbox executor (one tool) |
-| **SummaryAgent** | Synthesises text from prior agent outputs into prose | None (LLM only) |
+| **SummaryAgent** | Synthesizes text from prior agent outputs into prose | None (LLM only) |
 | **AggregatorAgent** | Merges all agent outputs into the final structured response | None (LLM only) |
 
 **Constraint — one tool per agent (invariant):**
@@ -309,7 +309,7 @@ DuckDuckGo via the `ddgs` Python library (no API key required).
 - Not suitable for production. Documented as a known trade-off in the README.
 
 **Change log:**
-- Originally used `duckduckgo-search`. During Phase 1 integration testing, the package was found to return empty results and emit a deprecation warning: it had been renamed to `ddgs`. Swapped to `ddgs>=9.0.0` with user authorisation. The import changed from `duckduckgo_search` to `ddgs`; the public API (`DDGS().text()`) is identical.
+- Originally used `duckduckgo-search`. During Phase 1 integration testing, the package was found to return empty results and emit a deprecation warning: it had been renamed to `ddgs`. Swapped to `ddgs>=9.0.0` with user authorization. The import changed from `duckduckgo_search` to `ddgs`; the public API (`DDGS().text()`) is identical.
 
 **Stretch goal:**
 - Make the search provider configurable via an environment variable or config file, allowing Tavily/Brave/SerpAPI to be plugged in without code changes.
@@ -362,7 +362,7 @@ Ruff is configured with rule sets E, F, I, W, UP (pycodestyle errors/warnings, p
 
 **Consequences:**
 - `ruff check .`, `ruff format --check .`, and `pyright src/ tests/` must all pass before any task is marked done (see AGENTS.md Definition of Done).
-- Rules and type suppressions (`# type: ignore`) may not be added without explicit user authorisation. The only accepted use is intentionally-invalid test inputs that exercise Pydantic's runtime validation.
+- Rules and type suppressions (`# type: ignore`) may not be added without explicit user authorization. The only accepted use is intentionally-invalid test inputs that exercise Pydantic's runtime validation.
 
 ---
 
@@ -375,3 +375,4 @@ Ruff is configured with rule sets E, F, I, W, UP (pycodestyle errors/warnings, p
 | S3 | ValidationAgent for hallucination checking | Core agents complete |
 | S4 | Configurable search provider (env var / config) | ADR-011 |
 | S5 | Timeout extension — warn user before expiry, allow extension | ADR-010 |
+| S6 | FetchAgent — full-page content retrieval to complement ResearchAgent snippets | ADR-005, ADR-011 |

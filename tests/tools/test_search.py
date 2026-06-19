@@ -1,3 +1,4 @@
+from typing import Any
 from unittest.mock import patch
 
 from src.tools.search import SEARCH_TOOL_DEFINITION, search
@@ -15,7 +16,7 @@ def test_tool_definition_has_description():
 
 
 def test_tool_definition_has_input_schema():
-    schema = SEARCH_TOOL_DEFINITION["input_schema"]
+    schema: dict[str, Any] = SEARCH_TOOL_DEFINITION["input_schema"]  # type: ignore[assignment]
     assert schema["type"] == "object"
     assert "query" in schema["properties"]
     assert "query" in schema["required"]
@@ -32,7 +33,7 @@ def test_search_returns_list(mock_ddgs_class):
 
 
 @patch("src.tools.search.DDGS")
-def test_search_normalises_result_keys(mock_ddgs_class):
+def test_search_normalizes_result_keys(mock_ddgs_class):
     mock_ddgs_class.return_value.text.return_value = [
         {"title": "Test Title", "href": "https://example.com", "body": "Test snippet"},
     ]

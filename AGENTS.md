@@ -10,22 +10,24 @@ Architectural decisions that informed these definitions live in `ADR.md`.
 
 ## Contents
 
-- [Role](#role)
-- [Development Rules](#development-rules)
-  - [Table of Contents Maintenance](#table-of-contents-maintenance)
-  - [Test-Driven Development](#test-driven-development-mandatory)
-  - [One Tool Per Agent](#one-tool-per-agent-invariant)
-  - [Backend / Frontend Decoupling](#backend--frontend-decoupling)
-  - [No New Dependencies Without Authorization](#no-new-dependencies-without-authorization)
-  - [No Framework Agents](#no-framework-agents)
-  - [Definition of Done](#definition-of-done)
-- [System Agents](#system-agents)
-  - [Orchestrator](#orchestrator)
-  - [Planner](#planner)
-  - [ResearchAgent](#researchagent)
-  - [CodeAgent](#codeagent)
-  - [SummaryAgent](#summaryagent)
-  - [AggregatorAgent](#aggregatoragent)
+- [Agent Definitions \& Development Rules](#agent-definitions--development-rules)
+  - [Contents](#contents)
+  - [Role](#role)
+  - [Development Rules](#development-rules)
+    - [Table of Contents Maintenance](#table-of-contents-maintenance)
+    - [Test-Driven Development (mandatory)](#test-driven-development-mandatory)
+    - [One Tool Per Agent (invariant)](#one-tool-per-agent-invariant)
+    - [Backend / Frontend Decoupling](#backend--frontend-decoupling)
+    - [No New Dependencies Without Authorization](#no-new-dependencies-without-authorization)
+    - [No Framework Agents](#no-framework-agents)
+    - [Definition of Done](#definition-of-done)
+  - [System Agents](#system-agents)
+    - [Orchestrator](#orchestrator)
+    - [Planner](#planner)
+    - [ResearchAgent](#researchagent)
+    - [CodeAgent](#codeagent)
+    - [SummaryAgent](#summaryagent)
+    - [AggregatorAgent](#aggregatoragent)
 
 ---
 
@@ -45,7 +47,7 @@ You are a senior-level Python developer. Your goal when writing code is clarity 
 
 All implementation follows strict red → green → refactor:
 
-1. **Red** — write a failing test that captures the exact behaviour required. Do not write implementation code first.
+1. **Red** — write a failing test that captures the exact behavior required. Do not write implementation code first.
 2. **Green** — write the minimum implementation to make that test pass. No gold-plating.
 3. **Refactor** — clean up code and tests while keeping all tests green.
 
@@ -79,7 +81,7 @@ A task is only complete when all of the following are true:
 1. **All unit tests pass** — no test in the suite may be failing when work is declared done.
 2. **New feature work is covered** — every net-new feature must have tests written for it. Untested features are not shippable.
 3. **Bug fixes are test-first** — a bug fix must begin with a test that reproduces the bug (red), and that test must be green once the fix is applied.
-4. **Linting and types are clean** — `ruff check .`, `ruff format --check .`, and `pyright src/ tests/` must all pass with zero errors. Fix all violations before marking done; do not suppress rules without explicit user authorisation.
+4. **Linting and types are clean** — `ruff check .`, `ruff format --check .`, and `pyright src/ tests/` must all pass with zero errors. Fix all violations before marking done; do not suppress rules without explicit user authorization.
 5. **Integration tests pass for touched functionality** — any tool or agent touched by a task has a corresponding integration test, and that test must pass. Integration tests are excluded from the default run and must be invoked explicitly with `pytest --integration`. Their results must be called out explicitly in the final task report (pass/fail per test).
 6. **Final requirements review** — before closing any task, re-read the original task requirements and the relevant ADRs to confirm the implementation is consistent with both. If a conflict is found, surface it before marking done.
 
@@ -107,7 +109,7 @@ The Orchestrator is the entry point for every task. It owns the `TaskContext`, d
 - Emit SSE events at every state transition.
 
 **Rules:**
-- Must never fabricate data. If a subtask fails, pass the failure through to the Aggregator honestly — do not synthesise a plausible result.
+- Must never fabricate data. If a subtask fails, pass the failure through to the Aggregator honestly — do not synthesize a plausible result.
 - Must not pass irrelevant prior agent outputs into a subtask's context. Inject only what the subtask `depends_on`.
 
 ---
@@ -159,7 +161,10 @@ A prose summary of findings with source URLs inline. No fabrication — if searc
 - Must use the `search` tool at least once. Never answer a research subtask from training knowledge alone.
 - Must cite sources. Any factual claim must be traceable to a search result.
 - Must not use any tool other than `search`.
-- If search results are irrelevant or insufficient, output a clearly labelled "insufficient data" result rather than hallucinating.
+- If search results are irrelevant or insufficient, output a clearly labeled "insufficient data" result rather than hallucinating.
+
+**Known limitation:**
+The `search` tool returns DuckDuckGo snippets (2–4 sentence excerpts), not full page content. For tasks requiring deep content (e.g. full articles, detailed reports), snippets may be insufficient. A future **FetchAgent** (stretch goal S6) would accept a URL and return the full cleaned page text, allowing the Planner to chain `research → fetch` when depth is needed.
 
 ---
 
@@ -214,8 +219,8 @@ Synthesises prose from the outputs of prior agents. Used when the task requires 
 A well-structured prose summary. Length and format are guided by the subtask description.
 
 **Prompt rules:**
-- Must only synthesise from the provided context. Must not introduce facts not present in the inputs.
-- Must not repeat verbatim large chunks of input — synthesise, don't transcribe.
+- Must only synthesize from the provided context. Must not introduce facts not present in the inputs.
+- Must not repeat verbatim large chunks of input — synthesize, don't transcribe.
 - Must flag explicitly if the provided inputs are contradictory or insufficient to answer the subtask.
 
 ---
@@ -250,5 +255,5 @@ The final step in every task. Receives all agent outputs (including any failures
 **Prompt rules:**
 - Must acknowledge failed subtasks in `warnings` rather than silently omitting them.
 - Must not fabricate data for failed subtasks.
-- The `answer` field must directly address the `original_request`, not just summarise what the agents did.
+- The `answer` field must directly address the `original_request`, not just summarize what the agents did.
 - Artifacts list must only reference files that actually exist (paths provided by CodeAgent output).

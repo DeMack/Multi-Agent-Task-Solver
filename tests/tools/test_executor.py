@@ -1,3 +1,5 @@
+from typing import Any
+
 from src.tools.executor import EXECUTE_PYTHON_TOOL_DEFINITION, ExecutionResult, execute_python
 
 # --- tool definition ---
@@ -13,7 +15,7 @@ def test_tool_definition_has_description():
 
 
 def test_tool_definition_has_input_schema():
-    schema = EXECUTE_PYTHON_TOOL_DEFINITION["input_schema"]
+    schema: dict[str, Any] = EXECUTE_PYTHON_TOOL_DEFINITION["input_schema"]  # type: ignore[assignment]
     assert schema["type"] == "object"
     assert "code" in schema["properties"]
     assert "code" in schema["required"]

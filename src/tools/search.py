@@ -1,6 +1,7 @@
+from anthropic.types import ToolParam
 from ddgs import DDGS
 
-SEARCH_TOOL_DEFINITION = {
+SEARCH_TOOL_DEFINITION: ToolParam = {
     "name": "search",
     "description": (
         "Search the web for up-to-date information using DuckDuckGo. "

@@ -5,7 +5,9 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-EXECUTE_PYTHON_TOOL_DEFINITION = {
+from anthropic.types import ToolParam
+
+EXECUTE_PYTHON_TOOL_DEFINITION: ToolParam = {
     "name": "execute_python",
     "description": (
         "Execute Python code in a sandboxed subprocess. "
