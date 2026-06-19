@@ -48,6 +48,10 @@ def execute_python(
     to output_dir, where it should write any generated files (charts, etc.).
     Any files found in output_dir after execution are reported as artifacts.
     """
+    # Resolve to an absolute path before passing to the subprocess.
+    # The subprocess runs in a temp working directory, so a relative OUTPUT_DIR
+    # would be resolved against that temp dir instead of the project root.
+    output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as work_dir:

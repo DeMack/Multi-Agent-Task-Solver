@@ -15,7 +15,7 @@ class Config:
     def from_env(cls) -> "Config":
         return cls(
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-            agent_timeout_seconds=int(os.environ.get("AGENT_TIMEOUT_SECONDS", "60")),
+            agent_timeout_seconds=int(os.environ.get("AGENT_TIMEOUT_SECONDS", "120")),
             code_execution_timeout_seconds=int(
                 os.environ.get("CODE_EXECUTION_TIMEOUT_SECONDS", "30")
             ),

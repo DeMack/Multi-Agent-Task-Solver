@@ -109,6 +109,19 @@
       border-radius: 50%; animation: spin 0.7s linear infinite;
     }
 
+    /* ── Thinking spinner (larger, used while planning) ── */
+    .thinking-spinner {
+      width: 20px; height: 20px; flex-shrink: 0;
+      border: 2px solid #6366f133; border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.9s linear infinite;
+    }
+    .thinking-row {
+      display: flex; align-items: center; gap: 0.75rem;
+    }
+    .thinking-label {
+      color: var(--muted); font-size: 0.9rem;
+    }
+
     /* ── Subtask list ── */
     .subtask {
       display: flex; align-items: flex-start; gap: 0.75rem;
@@ -184,6 +197,14 @@
   <!-- Error banner -->
   <div class="error-banner hidden" id="error-banner"></div>
 
+  <!-- Thinking / planning spinner -->
+  <div class="card hidden" id="thinking-card">
+    <div class="thinking-row">
+      <div class="thinking-spinner"></div>
+      <span class="thinking-label" id="thinking-label">Planning your request…</span>
+    </div>
+  </div>
+
   <!-- Clarification -->
   <div class="card hidden" id="clarification-card">
     <h2>Clarification Needed</h2>
@@ -248,6 +269,7 @@
     }
 
     taskId = data.task_id;
+    showEl('thinking-card');
     openStream();
   }
 
@@ -258,10 +280,12 @@
 
     es.addEventListener('clarification_needed', (e) => {
       const { questions } = parseData(e);
+      document.getElementById('thinking-label').textContent = 'Waiting for your answers…';
       showClarification(questions);
     });
 
     es.addEventListener('plan_ready', (e) => {
+      hideEl('thinking-card');
       const { subtasks } = parseData(e);
       renderPlan(subtasks);
     });
@@ -288,6 +312,7 @@
     });
 
     es.addEventListener('error', (e) => {
+      hideEl('thinking-card');
       try {
         const { message } = parseData(e);
         showError(message || 'An error occurred.');
@@ -440,7 +465,8 @@
     if (es) { es.close(); es = null; }
     taskId = null;
     document.getElementById('request-input').value = '';
-    ['clarification-card', 'plan-card', 'result-card', 'error-banner'].forEach(hideEl);
+    ['thinking-card', 'clarification-card', 'plan-card', 'result-card', 'error-banner'].forEach(hideEl);
+    document.getElementById('thinking-label').textContent = 'Planning your request…';
     document.getElementById('subtask-list').innerHTML = '';
     document.getElementById('result-artifacts').innerHTML = '';
     document.getElementById('result-warnings').classList.add('hidden');

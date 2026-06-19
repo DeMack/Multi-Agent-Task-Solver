@@ -5,7 +5,7 @@ from src.config import Config
 
 def test_default_agent_timeout():
     cfg = Config.from_env()
-    assert cfg.agent_timeout_seconds == 60
+    assert cfg.agent_timeout_seconds == 120
 
 
 def test_default_code_execution_timeout():

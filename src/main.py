@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import sys
 import uuid
 from contextlib import asynccontextmanager
 
@@ -20,6 +22,19 @@ from src.models import (
 from src.orchestrator import Orchestrator
 
 _client = Anthropic()
+
+# Attach a dedicated handler to the src logger so INFO messages always appear
+# regardless of uvicorn's root-logger level. The guard prevents duplicate
+# handlers when uvicorn hot-reloads the module.
+_src_log = logging.getLogger("src")
+if not _src_log.handlers:
+    _h = logging.StreamHandler(sys.stderr)
+    _h.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)-8s %(name)s — %(message)s", "%H:%M:%S")
+    )
+    _src_log.addHandler(_h)
+    _src_log.propagate = False
+_src_log.setLevel(logging.INFO)
 
 
 @asynccontextmanager

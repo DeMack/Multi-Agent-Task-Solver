@@ -1,4 +1,5 @@
 import json
+import logging
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,8 @@ from anthropic import Anthropic
 from src.agents._helpers import strip_fences
 from src.models import SubTask, TaskContext
 from src.tools.executor import EXECUTE_PYTHON_TOOL_DEFINITION, execute_python
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a code execution agent. Write Python and run it using execute_python.
 
@@ -47,8 +50,20 @@ class CodeAgent:
                         text = block.text  # type: ignore[assignment]
                         break
                 try:
-                    return json.loads(strip_fences(text))  # type: ignore[no-any-return]
-                except json.JSONDecodeError:
+                    result = json.loads(strip_fences(text))
+                    logger.info(
+                        "[%s] code agent finished — artifact_path=%r",
+                        subtask.id,
+                        result.get("artifact_path"),
+                    )
+                    return result  # type: ignore[no-any-return]
+                except json.JSONDecodeError as exc:
+                    logger.warning(
+                        "[%s] code agent response was not valid JSON: %s — raw: %r",
+                        subtask.id,
+                        exc,
+                        text[:200],
+                    )
                     return {"result": text, "artifact_path": None}
 
             tool_results = []

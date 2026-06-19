@@ -46,7 +46,7 @@ def _ctx() -> TaskContext:
 
 
 def test_planner_model_is_opus():
-    assert Planner.MODEL == "claude-opus-4"
+    assert Planner.MODEL == "claude-opus-4-8"
 
 
 # --- plan() ---
@@ -55,7 +55,7 @@ def test_planner_model_is_opus():
 def test_plan_calls_client_with_opus():
     client = _client(_response(VALID_JSON))
     Planner(client).plan(_ctx())
-    assert client.messages.create.call_args.kwargs["model"] == "claude-opus-4"
+    assert client.messages.create.call_args.kwargs["model"] == "claude-opus-4-8"
 
 
 def test_plan_returns_task_graph_on_valid_json():

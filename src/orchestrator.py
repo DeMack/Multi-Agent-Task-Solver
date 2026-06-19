@@ -1,6 +1,8 @@
 import asyncio
+import logging
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from anthropic import Anthropic
@@ -13,6 +15,8 @@ from src.agents.summary import SummaryAgent
 from src.config import Config
 from src.events import arm_clarification, close, publish, wait_for_clarification
 from src.models import SSEEvent, SubTask, TaskContext
+
+logger = logging.getLogger(__name__)
 
 _CLARIFICATION_SYSTEM = """You analyze user requests for a multi-agent AI task solver.
 
@@ -35,11 +39,13 @@ class Orchestrator:
         self.config = config
 
     async def run(self, context: TaskContext) -> None:
+        logger.info("task %s: starting — %r", context.task_id, context.original_request[:80])
         try:
             await self._clarification_phase(context)
             await self._planning_phase(context)
             await self._execution_phase(context)
         except Exception as exc:
+            logger.error("task %s: fatal error — %s", context.task_id, exc)
             await self._emit(context.task_id, "error", {"message": str(exc)})
         finally:
             await close(context.task_id)
@@ -49,6 +55,7 @@ class Orchestrator:
     async def _clarification_phase(self, context: TaskContext) -> None:
         if context.clarifications:
             return
+        logger.info("task %s: checking for ambiguities", context.task_id)
         questions = await asyncio.to_thread(self._detect_ambiguities, context.original_request)
         if not questions:
             return
@@ -81,11 +88,18 @@ class Orchestrator:
     # --- planning ---
 
     async def _planning_phase(self, context: TaskContext) -> None:
+        logger.info("task %s: planning", context.task_id)
         planner = Planner(self.client)
         try:
             graph = await asyncio.to_thread(planner.plan, context)
         except PlannerError as exc:
             raise RuntimeError(f"Planning failed: {exc}") from exc
+        logger.info(
+            "task %s: plan ready — %d subtasks: %s",
+            context.task_id,
+            len(graph.subtasks),
+            ", ".join(f"{s.id}({s.agent})" for s in graph.subtasks),
+        )
         context.plan = graph
         await self._emit(
             context.task_id,
@@ -159,14 +173,30 @@ class Orchestrator:
                 "description": subtask.description,
             },
         )
+        max_attempts = self.config.max_agent_retries + 1
         last_exc: BaseException = RuntimeError("no attempts made")
-        for attempt in range(self.config.max_agent_retries + 1):
+        for attempt in range(max_attempts):
+            logger.info(
+                "task %s: %s/%s attempt %d/%d",
+                context.task_id,
+                subtask.agent,
+                subtask.id,
+                attempt + 1,
+                max_attempts,
+            )
             try:
                 result = await asyncio.wait_for(
                     self._dispatch(subtask, context),
                     timeout=float(self.config.agent_timeout_seconds),
                 )
                 has_artifact = isinstance(result, dict) and result.get("artifact_path") is not None
+                logger.info(
+                    "task %s: %s/%s completed (has_artifact=%s)",
+                    context.task_id,
+                    subtask.agent,
+                    subtask.id,
+                    has_artifact,
+                )
                 await self._emit(
                     context.task_id,
                     "agent_completed",
@@ -178,11 +208,36 @@ class Orchestrator:
                     },
                 )
                 return result
+            except TimeoutError as exc:
+                last_exc = exc
+                logger.warning(
+                    "task %s: %s/%s timed out after %ds (attempt %d/%d)",
+                    context.task_id,
+                    subtask.agent,
+                    subtask.id,
+                    self.config.agent_timeout_seconds,
+                    attempt + 1,
+                    max_attempts,
+                )
             except BaseException as exc:
                 last_exc = exc
-                if attempt < self.config.max_agent_retries:
-                    continue
+                logger.warning(
+                    "task %s: %s/%s error (attempt %d/%d): %s",
+                    context.task_id,
+                    subtask.agent,
+                    subtask.id,
+                    attempt + 1,
+                    max_attempts,
+                    exc,
+                )
 
+        logger.error(
+            "task %s: %s/%s permanently failed: %s",
+            context.task_id,
+            subtask.agent,
+            subtask.id,
+            last_exc,
+        )
         await self._emit(
             context.task_id,
             "agent_failed",
@@ -200,9 +255,23 @@ class Orchestrator:
                 return await asyncio.to_thread(ResearchAgent(self.client).run, subtask, context)
             case "code":
                 output_dir = self.config.outputs_dir / context.task_id
-                return await asyncio.to_thread(
+                result = await asyncio.to_thread(
                     CodeAgent(self.client).run, subtask, context, output_dir
                 )
+                # Build the web URL from the filename alone. Using relative_to()
+                # is fragile — the LLM may report a path that differs from our
+                # resolved output_dir (symlinks, CWD drift, stdout-constructed
+                # paths). We own the directory structure, so just take the name.
+                if isinstance(result, dict):
+                    raw_path = result.get("artifact_path")
+                    if raw_path:
+                        filename = Path(raw_path).name
+                        url = f"/outputs/{context.task_id}/{filename}"
+                        logger.info("task %s: artifact %r → %s", context.task_id, raw_path, url)
+                        result["artifact_path"] = url
+                    else:
+                        logger.info("task %s: code agent returned no artifact", context.task_id)
+                return result
             case "summary":
                 return await asyncio.to_thread(SummaryAgent(self.client).run, subtask, context)
             case "aggregator":

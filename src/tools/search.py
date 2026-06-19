@@ -1,5 +1,9 @@
+import logging
+
 from anthropic.types import ToolParam
 from ddgs import DDGS
+
+logger = logging.getLogger(__name__)
 
 SEARCH_TOOL_DEFINITION: ToolParam = {
     "name": "search",
@@ -32,5 +36,8 @@ def search(query: str, max_results: int = 5) -> list[dict]:
     Each result dict has keys: title, url, snippet.
     Returns an empty list if no results are found.
     """
+    logger.info("ddgs: querying %r", query)
     raw = DDGS().text(query, max_results=max_results)
-    return [{"title": r["title"], "url": r["href"], "snippet": r["body"]} for r in (raw or [])]
+    results = [{"title": r["title"], "url": r["href"], "snippet": r["body"]} for r in (raw or [])]
+    logger.info("ddgs: got %d results for %r", len(results), query)
+    return results

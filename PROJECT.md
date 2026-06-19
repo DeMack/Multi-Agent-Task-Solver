@@ -227,8 +227,8 @@ All events share a common envelope:
 - [x] `static/index.html` — request form, SSE listener, agent progress cards, clarification Q&A form, result display with artifact rendering
 
 ### Phase 6 — Polish & Docs
-- [ ] End-to-end test with the example request ("Summarize financial trends + create a chart")
-- [ ] `README.md` — setup, how to run, design decisions, trade-offs
+- [x] End-to-end test with the example request ("Summarize financial trends + create a chart")
+- [x] `README.md` — setup, how to run, design decisions, trade-offs
 
 ---
 

@@ -1,22 +1,27 @@
 import json
+import logging
 
 from anthropic import Anthropic
 
 from src.agents._helpers import strip_fences
 from src.models import TaskContext
 
+logger = logging.getLogger(__name__)
+
 SYSTEM_PROMPT = """You are the final aggregator in a multi-agent pipeline.
 
 Return ONLY this JSON — no prose, no code fences:
 {
   "answer": "<direct response to the user's original request>",
-  "artifacts": [{"type": "chart", "url": "/outputs/<filename>", "caption": "..."}],
+  "artifacts": [{"type": "chart", "url": "<artifact_path value>", "caption": "..."}],
   "warnings": ["<failed or insufficient subtask descriptions, if any>"]
 }
 
 Rules:
 - answer must directly address the original request, not just summarize what the agents did.
-- artifacts must only reference files that actually exist (paths provided in agent outputs).
+- artifacts: use the artifact_path value from the code agent output exactly as-is — it is
+  already a web URL (e.g. /outputs/TASKID/chart.png). Do not modify or reconstruct it.
+- Only include artifacts that have a non-null artifact_path in the agent outputs.
 - warnings must name any subtask that failed or produced insufficient data.
 - Use empty arrays for artifacts and warnings when none apply."""
 
@@ -40,8 +45,18 @@ class AggregatorAgent:
                 text = block.text  # type: ignore[assignment]
                 break
         try:
-            return json.loads(strip_fences(text))  # type: ignore[no-any-return]
-        except json.JSONDecodeError:
+            result = json.loads(strip_fences(text))
+            for a in result.get("artifacts", []):
+                url = a.get("url", "")
+                if url and not url.startswith("/outputs/"):
+                    logger.warning("aggregator: artifact URL looks wrong — %r", url)
+                else:
+                    logger.info("aggregator: artifact url=%r", url)
+            if result.get("warnings"):
+                logger.warning("aggregator: warnings — %s", result["warnings"])
+            return result  # type: ignore[no-any-return]
+        except json.JSONDecodeError as exc:
+            logger.error("aggregator: failed to parse JSON response: %s", exc)
             return {"answer": text, "artifacts": [], "warnings": []}
 
     def _build_prompt(self, context: TaskContext) -> str:

@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 
 from anthropic import Anthropic
@@ -6,6 +7,8 @@ from pydantic import ValidationError
 
 from src.agents._helpers import strip_fences
 from src.models import TaskContext, TaskGraph
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a task planner for a multi-agent pipeline.
 
@@ -28,7 +31,10 @@ Planning rules:
 - Every plan must end with exactly one aggregator subtask that depends on all others.
 - Prefer fewer, well-scoped subtasks over many fine-grained ones.
 - No circular dependencies.
-- If the request is simple, a single summary subtask followed by an aggregator is acceptable."""
+- If the request is simple, a single summary subtask followed by an aggregator is acceptable.
+- Do not follow a single research subtask with a summary subtask. Research agents already
+  produce synthesized findings. Use a summary subtask only when combining outputs from two
+  or more prior subtasks into a single narrative."""
 
 RETRY_PROMPT = (
     "Your previous response could not be parsed as a valid task plan.\n"
@@ -42,7 +48,7 @@ class PlannerError(Exception):
 
 
 class Planner:
-    MODEL = "claude-opus-4"
+    MODEL = "claude-opus-4-8"
 
     def __init__(self, client: Anthropic) -> None:
         self.client = client
@@ -53,6 +59,7 @@ class Planner:
         last_exc: Exception | None = None
 
         for attempt in range(2):
+            logger.info("planner: attempt %d/2 — calling API", attempt + 1)
             response = self.client.messages.create(
                 model=self.MODEL,
                 max_tokens=4096,
@@ -61,9 +68,12 @@ class Planner:
             )
             text = self._extract_text(response)
             try:
-                return TaskGraph.model_validate(json.loads(strip_fences(text)))
+                graph = TaskGraph.model_validate(json.loads(strip_fences(text)))
+                logger.info("planner: succeeded on attempt %d/2", attempt + 1)
+                return graph
             except (json.JSONDecodeError, ValidationError) as exc:
                 last_exc = exc
+                logger.warning("planner: attempt %d/2 failed validation: %s", attempt + 1, exc)
                 messages += [
                     {"role": "assistant", "content": text},
                     {"role": "user", "content": RETRY_PROMPT.format(error=exc)},
