@@ -81,8 +81,6 @@
     }
     button:hover:not(:disabled) { background: var(--accent-dk); }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
-    .btn-ghost { background: var(--surface-2); color: var(--text); }
-    .btn-ghost:hover:not(:disabled) { background: var(--border); }
 
     .btn-row { display: flex; justify-content: flex-end; margin-top: 0.75rem; gap: 0.5rem; }
 
@@ -109,18 +107,14 @@
       border-radius: 50%; animation: spin 0.7s linear infinite;
     }
 
-    /* ── Thinking spinner (larger, used while planning) ── */
+    /* ── Thinking spinner ── */
     .thinking-spinner {
       width: 20px; height: 20px; flex-shrink: 0;
       border: 2px solid #6366f133; border-top-color: var(--accent);
       border-radius: 50%; animation: spin 0.9s linear infinite;
     }
-    .thinking-row {
-      display: flex; align-items: center; gap: 0.75rem;
-    }
-    .thinking-label {
-      color: var(--muted); font-size: 0.9rem;
-    }
+    .thinking-row { display: flex; align-items: center; gap: 0.75rem; }
+    .thinking-label { color: var(--muted); font-size: 0.9rem; }
 
     /* ── Subtask list ── */
     .subtask {
@@ -163,11 +157,35 @@
     .warnings ul { margin-top: 0.4rem; padding-left: 1.25rem; }
     .warnings li { font-size: 0.85rem; color: #fca5a5; }
 
-    /* ── Error banner ── */
-    .error-banner {
+    /* ── Error card ── */
+    .error-card {
       padding: 0.75rem 1rem; background: #2a1a1a;
       border-radius: var(--radius); border-left: 3px solid var(--error);
       color: #fca5a5; font-size: 0.9rem; margin-bottom: 1rem;
+    }
+
+    /* ── Conversation ── */
+    .session-separator {
+      display: flex; align-items: center; gap: 0.75rem;
+      margin: 1.5rem 0 1rem; color: var(--muted); font-size: 0.72rem;
+      font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .session-separator::before, .session-separator::after {
+      content: ''; flex: 1; height: 1px; background: var(--border);
+    }
+
+    /* Submitted request displayed inline */
+    .query-card {
+      border-left: 3px solid var(--accent);
+      font-size: 0.95rem; line-height: 1.6;
+      white-space: pre-wrap; word-break: break-word;
+      color: var(--text);
+    }
+
+    /* Input card hint text */
+    .input-hint {
+      font-size: 0.78rem; color: var(--muted);
+      margin-top: 0.5rem; text-align: right;
     }
   </style>
 </head>
@@ -179,60 +197,7 @@
     <p>Submit a business request and watch multiple AI agents collaborate to answer it.</p>
   </header>
 
-  <!-- Request form -->
-  <div class="card" id="form-card">
-    <h2>Your Request</h2>
-    <textarea
-      id="request-input"
-      placeholder="e.g. Summarize recent AI safety research and create a timeline chart of key milestones"
-    ></textarea>
-    <div class="btn-row">
-      <button id="submit-btn" onclick="submitRequest()">Solve →</button>
-    </div>
-    <p style="font-size:0.78rem;color:var(--muted);margin-top:0.5rem;text-align:right">
-      Ctrl+Enter / ⌘+Enter to submit
-    </p>
-  </div>
-
-  <!-- Error banner -->
-  <div class="error-banner hidden" id="error-banner"></div>
-
-  <!-- Thinking / planning spinner -->
-  <div class="card hidden" id="thinking-card">
-    <div class="thinking-row">
-      <div class="thinking-spinner"></div>
-      <span class="thinking-label" id="thinking-label">Planning your request…</span>
-    </div>
-  </div>
-
-  <!-- Clarification -->
-  <div class="card hidden" id="clarification-card">
-    <h2>Clarification Needed</h2>
-    <p style="color:var(--muted);font-size:0.88rem;margin-bottom:1rem">
-      Please answer the following before the agents proceed.
-    </p>
-    <div id="clarification-questions"></div>
-    <div class="btn-row">
-      <button onclick="submitClarification()">Submit Answers →</button>
-    </div>
-  </div>
-
-  <!-- Agent progress -->
-  <div class="card hidden" id="plan-card">
-    <h2>Agent Progress</h2>
-    <div id="subtask-list"></div>
-  </div>
-
-  <!-- Final result -->
-  <div class="card hidden" id="result-card">
-    <h2>Result</h2>
-    <div class="answer" id="result-answer"></div>
-    <div class="artifacts" id="result-artifacts"></div>
-    <div class="hidden" id="result-warnings"></div>
-    <div class="btn-row" style="margin-top:1rem">
-      <button class="btn-ghost" onclick="resetUI()">New Request</button>
-    </div>
-  </div>
+  <div id="conversation"></div>
 
 </div>
 
@@ -240,18 +205,43 @@
   'use strict';
 
   const ICONS = { research: '🔍', code: '💻', summary: '📝', aggregator: '📊' };
+  let sessionCount = 0;
 
-  let taskId = null;
-  let es = null;
+  // ── Input card ───────────────────────────────────────────────────────
+  // A fresh input card is appended at the bottom on load and after each result.
 
-  // ── Submit request ──────────────────────────────────────────────────
+  function appendInputCard() {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML =
+      '<h2>Your Request</h2>' +
+      '<textarea placeholder="e.g. Summarize recent AI safety research and create a timeline chart of key milestones"></textarea>' +
+      '<div class="btn-row"><button>Solve →</button></div>' +
+      '<p class="input-hint">Ctrl+Enter / ⌘+Enter to submit</p>';
 
-  async function submitRequest() {
-    const request = document.getElementById('request-input').value.trim();
+    const textarea = card.querySelector('textarea');
+    const btn      = card.querySelector('button');
+
+    const submit = () => submitRequest(card, textarea, btn);
+    btn.onclick = submit;
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit();
+    });
+
+    document.getElementById('conversation').appendChild(card);
+    card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    // Small delay so the scroll finishes before focus opens the keyboard on mobile
+    setTimeout(() => textarea.focus(), 300);
+  }
+
+  // ── Submit ───────────────────────────────────────────────────────────
+
+  async function submitRequest(inputCard, textarea, btn) {
+    const request = textarea.value.trim();
     if (!request) return;
 
-    lockForm();
-    hideEl('error-banner');
+    btn.disabled    = true;
+    textarea.disabled = true;
 
     let data;
     try {
@@ -263,214 +253,255 @@
       if (!res.ok) throw new Error('Server returned ' + res.status);
       data = await res.json();
     } catch (err) {
-      showError(err.message);
-      unlockForm();
+      // Re-enable so the user can try again in the same card
+      btn.disabled    = false;
+      textarea.disabled = false;
+      showErrorCard(err.message);
       return;
     }
 
-    taskId = data.task_id;
-    showEl('thinking-card');
-    openStream();
+    sessionCount++;
+
+    // Separate from previous session
+    if (sessionCount > 1) {
+      const sep = document.createElement('div');
+      sep.className = 'session-separator';
+      inputCard.before(sep);
+    }
+
+    // Transform the input card into a read-only query display
+    inputCard.className = 'card query-card';
+    inputCard.textContent = request;
+
+    // Build session cards below and start streaming
+    const session = buildSession(data.task_id);
+    show(session.thinkingCard);
+    openStream(session);
   }
 
-  // ── SSE stream ──────────────────────────────────────────────────────
+  // ── Session builder ──────────────────────────────────────────────────
+  // Appends the progress/result cards to #conversation and returns refs.
 
-  function openStream() {
-    es = new EventSource('/task/' + taskId + '/stream');
+  function buildSession(taskId) {
+    const session = { taskId, es: null };
+    const thread  = document.getElementById('conversation');
+
+    function addCard(html) {
+      const card = document.createElement('div');
+      card.className = 'card hidden';
+      card.innerHTML = html;
+      thread.appendChild(card);
+      return card;
+    }
+
+    // Thinking
+    session.thinkingCard = addCard(
+      '<div class="thinking-row">' +
+        '<div class="thinking-spinner"></div>' +
+        '<span class="thinking-label">Planning your request…</span>' +
+      '</div>'
+    );
+    session.thinkingLabel = session.thinkingCard.querySelector('.thinking-label');
+
+    // Clarification
+    session.clarificationCard = addCard(
+      '<h2>Clarification Needed</h2>' +
+      '<p style="color:var(--muted);font-size:0.88rem;margin-bottom:1rem">' +
+        'Please answer the following before the agents proceed.' +
+      '</p>' +
+      '<div class="clarification-questions"></div>' +
+      '<div class="btn-row"><button>Submit Answers →</button></div>'
+    );
+    session.clarificationQuestions = session.clarificationCard.querySelector('.clarification-questions');
+    session.clarificationCard.querySelector('button').onclick = () => submitClarification(session);
+
+    // Plan
+    session.planCard = addCard('<h2>Agent Progress</h2><div class="subtask-list"></div>');
+    session.subtaskList = session.planCard.querySelector('.subtask-list');
+
+    // Result
+    session.resultCard = addCard(
+      '<h2>Result</h2>' +
+      '<div class="answer"></div>' +
+      '<div class="artifacts"></div>' +
+      '<div class="result-warnings hidden"></div>'
+    );
+    session.resultAnswer    = session.resultCard.querySelector('.answer');
+    session.resultArtifacts = session.resultCard.querySelector('.artifacts');
+    session.resultWarnings  = session.resultCard.querySelector('.result-warnings');
+
+    return session;
+  }
+
+  // ── SSE stream ───────────────────────────────────────────────────────
+
+  function openStream(session) {
+    const es = new EventSource('/task/' + session.taskId + '/stream');
+    session.es = es;
 
     es.addEventListener('clarification_needed', (e) => {
       const { questions } = parseData(e);
-      document.getElementById('thinking-label').textContent = 'Waiting for your answers…';
-      showClarification(questions);
+      session.thinkingLabel.textContent = 'Waiting for your answers…';
+      showClarification(session, questions);
     });
 
     es.addEventListener('plan_ready', (e) => {
-      hideEl('thinking-card');
-      const { subtasks } = parseData(e);
-      renderPlan(subtasks);
+      hide(session.thinkingCard);
+      renderPlan(session, parseData(e).subtasks);
     });
 
     es.addEventListener('agent_started', (e) => {
-      const { subtask_id } = parseData(e);
-      setStatus(subtask_id, 'running');
+      setStatus(session, parseData(e).subtask_id, 'running');
     });
 
     es.addEventListener('agent_completed', (e) => {
       const { subtask_id, summary } = parseData(e);
-      setStatus(subtask_id, 'done', summary);
+      setStatus(session, subtask_id, 'done', summary);
     });
 
     es.addEventListener('agent_failed', (e) => {
       const { subtask_id, error } = parseData(e);
-      setStatus(subtask_id, 'failed', error);
+      setStatus(session, subtask_id, 'failed', error);
     });
 
     es.addEventListener('result_ready', (e) => {
-      const { result } = parseData(e);
-      renderResult(result);
+      renderResult(session, parseData(e).result);
       es.close();
+      appendInputCard();
     });
 
     es.addEventListener('error', (e) => {
-      hideEl('thinking-card');
+      hide(session.thinkingCard);
       try {
         const { message } = parseData(e);
-        showError(message || 'An error occurred.');
+        showErrorCard(message || 'An error occurred.');
       } catch {
-        showError('An unexpected server error occurred.');
+        showErrorCard('An unexpected server error occurred.');
       }
       es.close();
+      appendInputCard();
     });
 
     es.onerror = () => {
-      // Stream closed — only flag an error if we haven't shown a result yet
-      if (!document.getElementById('result-card').classList.contains('hidden')) return;
+      // Fires on normal close too — only surface an error if we have no result
+      if (!session.resultCard.classList.contains('hidden')) return;
       es.close();
+      appendInputCard();
     };
   }
 
-  function parseData(e) {
-    return JSON.parse(e.data).data;
-  }
+  function parseData(e) { return JSON.parse(e.data).data; }
 
-  // ── Clarification ───────────────────────────────────────────────────
+  // ── Clarification ────────────────────────────────────────────────────
 
-  function showClarification(questions) {
-    const container = document.getElementById('clarification-questions');
-    container.innerHTML = '';
+  function showClarification(session, questions) {
+    session.clarificationQuestions.innerHTML = '';
     questions.forEach((q, i) => {
       const row = document.createElement('div');
       row.className = 'question-row';
       row.innerHTML =
-        '<label class="question-label" for="cq' + i + '">' +
+        '<label class="question-label" for="cq-' + session.taskId + '-' + i + '">' +
           (i + 1) + '. ' + esc(q) +
         '</label>' +
-        '<input type="text" id="cq' + i + '" placeholder="Your answer…" />';
-      container.appendChild(row);
+        '<input type="text" id="cq-' + session.taskId + '-' + i + '" placeholder="Your answer…" />';
+      session.clarificationQuestions.appendChild(row);
     });
-    showEl('clarification-card');
+    show(session.clarificationCard);
   }
 
-  async function submitClarification() {
-    const inputs = document.querySelectorAll('#clarification-questions input');
+  async function submitClarification(session) {
+    const inputs  = session.clarificationCard.querySelectorAll('input[type="text"]');
     const answers = Array.from(inputs).map((el) => el.value.trim());
     try {
-      await fetch('/task/' + taskId + '/clarify', {
+      await fetch('/task/' + session.taskId + '/clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ answers }),
       });
     } catch (err) {
-      showError('Failed to submit answers: ' + err.message);
+      showErrorCard('Failed to submit answers: ' + err.message);
       return;
     }
-    hideEl('clarification-card');
+    hide(session.clarificationCard);
   }
 
-  // ── Plan / subtask cards ────────────────────────────────────────────
+  // ── Plan ─────────────────────────────────────────────────────────────
 
-  function renderPlan(subtasks) {
-    const list = document.getElementById('subtask-list');
-    list.innerHTML = '';
+  function renderPlan(session, subtasks) {
+    session.subtaskList.innerHTML = '';
     subtasks.forEach((s) => {
       const el = document.createElement('div');
       el.className = 'subtask';
-      el.id = 'subtask-' + s.id;
+      el.dataset.id = s.id;
       el.innerHTML =
         '<div class="subtask-icon">' + (ICONS[s.agent] || '🤖') + '</div>' +
         '<div class="subtask-body">' +
           '<div class="subtask-desc">' + esc(s.description) + '</div>' +
           '<div class="subtask-agent">' + esc(s.agent) + '</div>' +
-          '<div class="subtask-status" id="st-' + s.id + '">' +
-            '<span class="badge badge-pending">Pending</span>' +
-          '</div>' +
-          '<div class="subtask-detail hidden" id="sd-' + s.id + '"></div>' +
+          '<div class="subtask-status"><span class="badge badge-pending">Pending</span></div>' +
+          '<div class="subtask-detail hidden"></div>' +
         '</div>';
-      list.appendChild(el);
+      session.subtaskList.appendChild(el);
     });
-    showEl('plan-card');
+    show(session.planCard);
   }
 
-  function setStatus(id, state, detail) {
-    const stEl = document.getElementById('st-' + id);
-    const sdEl = document.getElementById('sd-' + id);
-    if (!stEl) return;
-
+  function setStatus(session, id, state, detail) {
+    const row = session.subtaskList.querySelector('[data-id="' + id + '"]');
+    if (!row) return;
     const badges = {
       running: '<span class="badge badge-running"><span class="spinner"></span> Running</span>',
       done:    '<span class="badge badge-done">✓ Done</span>',
       failed:  '<span class="badge badge-failed">✗ Failed</span>',
       skipped: '<span class="badge badge-skipped">— Skipped</span>',
     };
-    stEl.innerHTML = badges[state] || '';
-
-    if (detail && sdEl) {
-      sdEl.textContent = detail;
-      sdEl.classList.remove('hidden');
+    row.querySelector('.subtask-status').innerHTML = badges[state] || '';
+    if (detail) {
+      const sd = row.querySelector('.subtask-detail');
+      sd.textContent = detail;
+      sd.classList.remove('hidden');
     }
   }
 
-  // ── Final result ────────────────────────────────────────────────────
+  // ── Result ───────────────────────────────────────────────────────────
 
-  function renderResult(result) {
-    document.getElementById('result-answer').textContent = result.answer || '';
+  function renderResult(session, result) {
+    session.resultAnswer.textContent = result.answer || '';
 
-    const artEl = document.getElementById('result-artifacts');
-    artEl.innerHTML = '';
+    session.resultArtifacts.innerHTML = '';
     (result.artifacts || []).forEach((a) => {
       const div = document.createElement('div');
       div.className = 'artifact';
       div.innerHTML =
         '<img src="' + esc(a.url) + '" alt="' + esc(a.caption || 'Chart') + '" />' +
         (a.caption ? '<div class="artifact-caption">' + esc(a.caption) + '</div>' : '');
-      artEl.appendChild(div);
+      session.resultArtifacts.appendChild(div);
     });
 
     const warnings = result.warnings || [];
-    const warnEl = document.getElementById('result-warnings');
     if (warnings.length > 0) {
-      warnEl.innerHTML =
+      session.resultWarnings.innerHTML =
         '<div class="warnings"><p>Issues encountered:</p><ul>' +
         warnings.map((w) => '<li>' + esc(w) + '</li>').join('') +
         '</ul></div>';
-      warnEl.classList.remove('hidden');
+      session.resultWarnings.classList.remove('hidden');
     }
 
-    showEl('result-card');
+    show(session.resultCard);
+    session.resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  // ── UI helpers ──────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────
 
-  function showError(msg) {
-    const el = document.getElementById('error-banner');
+  function show(el) { el.classList.remove('hidden'); }
+  function hide(el) { el.classList.add('hidden'); }
+
+  function showErrorCard(msg) {
+    const el = document.createElement('div');
+    el.className = 'error-card';
     el.textContent = '⚠ ' + msg;
-    el.classList.remove('hidden');
-    unlockForm();
-  }
-
-  function lockForm() {
-    document.getElementById('submit-btn').disabled = true;
-    document.getElementById('request-input').disabled = true;
-  }
-
-  function unlockForm() {
-    document.getElementById('submit-btn').disabled = false;
-    document.getElementById('request-input').disabled = false;
-  }
-
-  function showEl(id) { document.getElementById(id).classList.remove('hidden'); }
-  function hideEl(id) { document.getElementById(id).classList.add('hidden'); }
-
-  function resetUI() {
-    if (es) { es.close(); es = null; }
-    taskId = null;
-    document.getElementById('request-input').value = '';
-    ['thinking-card', 'clarification-card', 'plan-card', 'result-card', 'error-banner'].forEach(hideEl);
-    document.getElementById('thinking-label').textContent = 'Planning your request…';
-    document.getElementById('subtask-list').innerHTML = '';
-    document.getElementById('result-artifacts').innerHTML = '';
-    document.getElementById('result-warnings').classList.add('hidden');
-    unlockForm();
+    document.getElementById('conversation').appendChild(el);
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   function esc(s) {
@@ -481,10 +512,8 @@
       .replace(/"/g, '&quot;');
   }
 
-  // Ctrl+Enter / Cmd+Enter to submit
-  document.getElementById('request-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitRequest();
-  });
+  // ── Boot ─────────────────────────────────────────────────────────────
+  appendInputCard();
 </script>
 </body>
 </html>
