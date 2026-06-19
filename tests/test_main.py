@@ -145,3 +145,23 @@ def test_stream_content_type_is_sse():
 
     with client.stream("GET", f"/task/{task_id}/stream") as response:
         assert "text/event-stream" in response.headers["content-type"]
+
+
+# --- Phase 5: frontend ---
+
+
+def test_root_serves_html():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+
+
+def test_root_contains_request_form():
+    response = client.get("/")
+    assert b"request-input" in response.content
+    assert b"submit-btn" in response.content
+
+
+def test_root_contains_sse_listener():
+    response = client.get("/")
+    assert b"EventSource" in response.content

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from anthropic import Anthropic
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -30,6 +31,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Multi-Agent Task Solver", lifespan=lifespan)
 
 app.mount("/outputs", StaticFiles(directory=config.outputs_dir, check_dir=False), name="outputs")
+
+
+@app.get("/", include_in_schema=False)
+async def index() -> FileResponse:
+    return FileResponse("static/index.html")
 
 
 @app.post("/task", response_model=CreateTaskResponse)

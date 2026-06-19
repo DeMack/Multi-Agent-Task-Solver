@@ -6,24 +6,26 @@
 
 ## Contents
 
-- [What We're Building](#what-were-building)
-- [System Architecture](#system-architecture)
-- [Components](#components)
-  - [Backend (`src/`)](#backend-src)
-  - [Frontend (`static/`)](#frontend-static)
-  - [Output directory (`outputs/`)](#output-directory-outputs)
-- [Data Flow](#data-flow)
-- [Key Data Models](#key-data-models)
-- [SSE Event Schema](#sse-event-schema)
-- [Implementation Plan](#implementation-plan)
-  - [Phase 0 — Scaffold](#phase-0--scaffold)
-  - [Phase 1 — Tools](#phase-1--tools)
-  - [Phase 2 — Agents](#phase-2--agents)
-  - [Phase 3 — Orchestrator](#phase-3--orchestrator)
-  - [Phase 4 — API & Streaming](#phase-4--api--streaming)
-  - [Phase 5 — Frontend](#phase-5--frontend)
-  - [Phase 6 — Polish & Docs](#phase-6--polish--docs)
-- [Stretch Goals](#stretch-goals-not-in-plan-above)
+- [Multi-Agent Task Solver — Project Design \& Plan](#multi-agent-task-solver--project-design--plan)
+  - [Contents](#contents)
+  - [What We're Building](#what-were-building)
+  - [System Architecture](#system-architecture)
+  - [Components](#components)
+    - [Backend (`src/`)](#backend-src)
+    - [Frontend (`static/`)](#frontend-static)
+    - [Output directory (`outputs/`)](#output-directory-outputs)
+  - [Data Flow](#data-flow)
+  - [Key Data Models](#key-data-models)
+  - [SSE Event Schema](#sse-event-schema)
+  - [Implementation Plan](#implementation-plan)
+    - [Phase 0 — Scaffold](#phase-0--scaffold)
+    - [Phase 1 — Tools](#phase-1--tools)
+    - [Phase 2 — Agents](#phase-2--agents)
+    - [Phase 3 — Orchestrator](#phase-3--orchestrator)
+    - [Phase 4 — API \& Streaming](#phase-4--api--streaming)
+    - [Phase 5 — Frontend](#phase-5--frontend)
+    - [Phase 6 — Polish \& Docs](#phase-6--polish--docs)
+  - [Stretch Goals (not in plan above)](#stretch-goals-not-in-plan-above)
 
 ---
 
@@ -212,17 +214,17 @@ All events share a common envelope:
 - [x] `agents/aggregator.py` — Claude Sonnet, merge outputs into final structured result
 
 ### Phase 3 — Orchestrator
-- [ ] `events.py` — SSE event queue per task
-- [ ] `orchestrator.py` — clarification phase, task graph execution loop, dependency ordering, timeout + retry logic
+- [x] `events.py` — SSE event queue per task
+- [x] `orchestrator.py` — clarification phase, task graph execution loop, dependency ordering, timeout + retry logic
 
 ### Phase 4 — API & Streaming
-- [ ] `POST /task` — accept request, create TaskContext, kick off orchestrator in background task, return `task_id`
-- [ ] `POST /task/{id}/clarify` — submit clarification answers, resume orchestrator
-- [ ] `GET /task/{id}/stream` — SSE endpoint, stream events from queue
-- [ ] `GET /outputs/{path}` — serve static output files
+- [x] `POST /task` — accept request, create TaskContext, kick off orchestrator in background task, return `task_id`
+- [x] `POST /task/{id}/clarify` — submit clarification answers, resume orchestrator
+- [x] `GET /task/{id}/stream` — SSE endpoint, stream events from queue
+- [x] `GET /outputs/{path}` — serve static output files
 
 ### Phase 5 — Frontend
-- [ ] `static/index.html` — request form, SSE listener, agent progress cards, clarification Q&A form, result display with artifact rendering
+- [x] `static/index.html` — request form, SSE listener, agent progress cards, clarification Q&A form, result display with artifact rendering
 
 ### Phase 6 — Polish & Docs
 - [ ] End-to-end test with the example request ("Summarize financial trends + create a chart")
