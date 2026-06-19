@@ -256,7 +256,7 @@ FastAPI backend with SSE streaming + a minimal HTML/JS frontend. Backend and fro
 | `uvicorn[standard]` | ASGI server that runs the FastAPI app and listens for HTTP connections. FastAPI has no built-in server. |
 | `sse-starlette` | FastAPI has no native SSE primitive. This package adds an `EventSourceResponse` that handles SSE framing and keep-alive over a standard async generator. |
 | `starlette` | Pulled in automatically as a FastAPI dependency; not used directly. |
-| `httpx` *(dev only)* | Required by Starlette's `TestClient` to make requests against the app in tests. Not used at runtime. |
+| `httpx2` *(dev only)* | Required by Starlette's `TestClient` to make requests against the app in tests. Not used at runtime. |
 
 ---
 
