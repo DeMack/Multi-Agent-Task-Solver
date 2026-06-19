@@ -18,7 +18,10 @@ from src.models import SSEEvent, SubTask, TaskContext
 
 logger = logging.getLogger(__name__)
 
-_CLARIFICATION_SYSTEM = """You analyze user requests for a multi-agent AI task solver.
+
+class Orchestrator:
+    MODEL = "claude-sonnet-4-5"
+    _CLARIFICATION_SYSTEM = """You analyze user requests for a multi-agent AI task solver.
 
 If the request has critical missing information that would prevent producing a useful result,
 respond with numbered questions only:
@@ -29,10 +32,6 @@ If the request is clear enough to proceed, respond with exactly: CLEAR
 
 Be conservative — only ask when the ambiguity would fundamentally change the output.
 Most requests should be answered with CLEAR."""
-
-
-class Orchestrator:
-    MODEL = "claude-sonnet-4-5"
 
     def __init__(self, client: Anthropic, config: Config) -> None:
         self.client = client
@@ -68,7 +67,7 @@ class Orchestrator:
         response = self.client.messages.create(
             model=self.MODEL,
             max_tokens=512,
-            system=_CLARIFICATION_SYSTEM,
+            system=self._CLARIFICATION_SYSTEM,
             messages=[{"role": "user", "content": request}],
         )
         text = ""

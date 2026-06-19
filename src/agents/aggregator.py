@@ -48,7 +48,9 @@ class AggregatorAgent:
             result = json.loads(strip_fences(text))
             for a in result.get("artifacts", []):
                 url = a.get("url", "")
-                if url and not url.startswith("/outputs/"):
+                if not url:
+                    logger.warning("aggregator: artifact entry has no URL")
+                elif not url.startswith("/outputs/"):
                     logger.warning("aggregator: artifact URL looks wrong — %r", url)
                 else:
                     logger.info("aggregator: artifact url=%r", url)

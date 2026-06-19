@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 from src.config import config
-from src.events import create_queue, get_queue, submit_clarification
+from src.events import cleanup, create_queue, get_queue, submit_clarification
 from src.models import (
     ClarifyRequest,
     ClarifyResponse,
@@ -79,10 +79,13 @@ async def stream_task(task_id: str) -> EventSourceResponse:
         raise HTTPException(status_code=404, detail="Task not found")
 
     async def event_generator():
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            yield {"data": item.model_dump_json(), "event": item.event}
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield {"data": item.model_dump_json(), "event": item.event}
+        finally:
+            cleanup(task_id)
 
     return EventSourceResponse(event_generator())

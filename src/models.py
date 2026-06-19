@@ -1,14 +1,6 @@
-from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel
-
-
-class TaskStatus(StrEnum):
-    pending = "pending"
-    running = "running"
-    completed = "completed"
-    failed = "failed"
 
 
 class SubTask(BaseModel):
@@ -28,7 +20,6 @@ class TaskContext(BaseModel):
     clarifications: list[str]
     plan: TaskGraph | None = None
     agent_outputs: dict[str, Any] = {}
-    status: dict[str, TaskStatus] = {}
 
 
 # API request / response models

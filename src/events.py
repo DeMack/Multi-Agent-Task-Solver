@@ -27,6 +27,12 @@ async def close(task_id: str) -> None:
         await q.put(None)
 
 
+def cleanup(task_id: str) -> None:
+    _queues.pop(task_id, None)
+    _clarify_events.pop(task_id, None)
+    _clarify_answers.pop(task_id, None)
+
+
 def arm_clarification(task_id: str) -> None:
     _clarify_events[task_id] = asyncio.Event()
 

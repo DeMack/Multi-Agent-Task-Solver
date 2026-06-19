@@ -9,15 +9,7 @@ from src.models import (
     SubTask,
     TaskContext,
     TaskGraph,
-    TaskStatus,
 )
-
-
-def test_task_status_values():
-    assert TaskStatus.pending == "pending"
-    assert TaskStatus.running == "running"
-    assert TaskStatus.completed == "completed"
-    assert TaskStatus.failed == "failed"
 
 
 def test_subtask_valid():
@@ -67,7 +59,6 @@ def test_task_context_defaults():
     ctx = TaskContext(task_id="abc", original_request="x", clarifications=[])
     assert ctx.plan is None
     assert ctx.agent_outputs == {}
-    assert ctx.status == {}
 
 
 def test_task_context_accepts_plan():
@@ -84,16 +75,6 @@ def test_task_context_accepts_plan():
     )
     assert ctx.plan is not None
     assert len(ctx.plan.subtasks) == 1
-
-
-def test_task_context_status_uses_enum():
-    ctx = TaskContext(
-        task_id="abc",
-        original_request="x",
-        clarifications=[],
-        status={"t1": TaskStatus.running},
-    )
-    assert ctx.status["t1"] == TaskStatus.running
 
 
 def test_create_task_request_requires_request_field():

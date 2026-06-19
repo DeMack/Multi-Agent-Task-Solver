@@ -39,7 +39,7 @@ class ResearchAgent:
             # instead of issuing more searches.
             force_final = turn > self.MAX_SEARCH_TURNS
             if force_final:
-                logger.warning(
+                logger.info(
                     "[%s] max search turns (%d) reached — forcing final answer",
                     subtask.id,
                     self.MAX_SEARCH_TURNS,
@@ -98,6 +98,10 @@ class ResearchAgent:
                             "content": json.dumps(results),
                         }
                     )
+
+            if not tool_results:
+                logger.warning("[%s] tool_use response contained no recognized tools", subtask.id)
+                return ""
 
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})

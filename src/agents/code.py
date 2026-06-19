@@ -26,6 +26,7 @@ Rules:
 
 class CodeAgent:
     MODEL = "claude-sonnet-4-5"
+    MAX_EXECUTION_TURNS = 8
 
     def __init__(self, client: Anthropic) -> None:
         self.client = client
@@ -33,8 +34,19 @@ class CodeAgent:
     def run(self, subtask: SubTask, context: TaskContext, output_dir: Path) -> dict:  # type: ignore[type-arg]
         # list[Any]: SDK accepts str or list[blocks] as content at runtime
         messages: list[Any] = [{"role": "user", "content": self._build_prompt(subtask, context)}]
+        turn = 0
 
         while True:
+            turn += 1
+            if turn > self.MAX_EXECUTION_TURNS:
+                logger.warning(
+                    "[%s] max execution turns (%d) reached", subtask.id, self.MAX_EXECUTION_TURNS
+                )
+                return {
+                    "result": "Exceeded maximum execution turns without completing.",
+                    "artifact_path": None,
+                }
+
             response = self.client.messages.create(
                 model=self.MODEL,
                 max_tokens=4096,
@@ -81,6 +93,10 @@ class CodeAgent:
                             "content": json.dumps(asdict(exec_result)),
                         }
                     )
+
+            if not tool_results:
+                logger.warning("[%s] tool_use response contained no recognized tools", subtask.id)
+                return {"result": "", "artifact_path": None}
 
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
