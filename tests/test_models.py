@@ -2,14 +2,14 @@ import pytest
 from pydantic import ValidationError
 
 from src.models import (
-    TaskStatus,
-    SubTask,
-    TaskGraph,
-    TaskContext,
-    CreateTaskRequest,
-    CreateTaskResponse,
     ClarifyRequest,
     ClarifyResponse,
+    CreateTaskRequest,
+    CreateTaskResponse,
+    SubTask,
+    TaskContext,
+    TaskGraph,
+    TaskStatus,
 )
 
 
@@ -21,7 +21,9 @@ def test_task_status_values():
 
 
 def test_subtask_valid():
-    task = SubTask(id="t1", description="Research quarterly financials", agent="research", depends_on=[])
+    task = SubTask(
+        id="t1", description="Research quarterly financials", agent="research", depends_on=[]
+    )
     assert task.id == "t1"
     assert task.agent == "research"
     assert task.depends_on == []
@@ -35,14 +37,16 @@ def test_subtask_all_valid_agent_types():
 
 def test_subtask_rejects_invalid_agent():
     with pytest.raises(ValidationError):
-        SubTask(id="t1", description="...", agent="unknown_agent", depends_on=[])
+        SubTask(id="t1", description="...", agent="unknown_agent", depends_on=[])  # type: ignore[arg-type]
 
 
 def test_task_graph_holds_subtasks():
-    graph = TaskGraph(subtasks=[
-        SubTask(id="t1", description="Research", agent="research", depends_on=[]),
-        SubTask(id="t2", description="Summarise", agent="summary", depends_on=["t1"]),
-    ])
+    graph = TaskGraph(
+        subtasks=[
+            SubTask(id="t1", description="Research", agent="research", depends_on=[]),
+            SubTask(id="t2", description="Summarise", agent="summary", depends_on=["t1"]),
+        ]
+    )
     assert len(graph.subtasks) == 2
     assert graph.subtasks[1].depends_on == ["t1"]
 
@@ -67,9 +71,11 @@ def test_task_context_defaults():
 
 
 def test_task_context_accepts_plan():
-    graph = TaskGraph(subtasks=[
-        SubTask(id="t1", description="Research", agent="research", depends_on=[]),
-    ])
+    graph = TaskGraph(
+        subtasks=[
+            SubTask(id="t1", description="Research", agent="research", depends_on=[]),
+        ]
+    )
     ctx = TaskContext(
         task_id="abc",
         original_request="Analyse something",
@@ -98,7 +104,7 @@ def test_create_task_request_requires_request_field():
 
 def test_create_task_request_missing_request_raises():
     with pytest.raises(ValidationError):
-        CreateTaskRequest()
+        CreateTaskRequest()  # type: ignore[call-arg]
 
 
 def test_create_task_response_shape():

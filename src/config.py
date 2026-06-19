@@ -16,7 +16,9 @@ class Config:
         return cls(
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
             agent_timeout_seconds=int(os.environ.get("AGENT_TIMEOUT_SECONDS", "60")),
-            code_execution_timeout_seconds=int(os.environ.get("CODE_EXECUTION_TIMEOUT_SECONDS", "30")),
+            code_execution_timeout_seconds=int(
+                os.environ.get("CODE_EXECUTION_TIMEOUT_SECONDS", "30")
+            ),
             max_agent_retries=int(os.environ.get("MAX_AGENT_RETRIES", "2")),
             outputs_dir=Path(os.environ.get("OUTPUTS_DIR", "outputs")),
         )

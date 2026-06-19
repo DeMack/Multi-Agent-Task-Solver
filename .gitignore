@@ -27,6 +27,9 @@ htmlcov/
 .AppleDouble
 .LSOverride
 
+# Claude Code
+.claude/settings.local.json
+
 # VS Code
 .vscode/
 *.code-workspace

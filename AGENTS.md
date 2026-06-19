@@ -76,10 +76,12 @@ Agents are implemented directly on top of the Anthropic SDK. No LangChain, LangG
 
 A task is only complete when all of the following are true:
 
-1. **All tests pass** — no test in the suite may be failing when work is declared done.
+1. **All unit tests pass** — no test in the suite may be failing when work is declared done.
 2. **New feature work is covered** — every net-new feature must have tests written for it. Untested features are not shippable.
 3. **Bug fixes are test-first** — a bug fix must begin with a test that reproduces the bug (red), and that test must be green once the fix is applied.
-4. **Final requirements review** — before closing any task, re-read the original task requirements and the relevant ADRs to confirm the implementation is consistent with both. If a conflict is found, surface it before marking done.
+4. **Linting and types are clean** — `ruff check .`, `ruff format --check .`, and `pyright src/ tests/` must all pass with zero errors. Fix all violations before marking done; do not suppress rules without explicit user authorisation.
+5. **Integration tests pass for touched functionality** — any tool or agent touched by a task has a corresponding integration test, and that test must pass. Integration tests are excluded from the default run and must be invoked explicitly with `pytest --integration`. Their results must be called out explicitly in the final task report (pass/fail per test).
+6. **Final requirements review** — before closing any task, re-read the original task requirements and the relevant ADRs to confirm the implementation is consistent with both. If a conflict is found, surface it before marking done.
 
 ---
 

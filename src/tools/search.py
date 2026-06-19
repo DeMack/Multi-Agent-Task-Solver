@@ -1,0 +1,35 @@
+from ddgs import DDGS
+
+SEARCH_TOOL_DEFINITION = {
+    "name": "search",
+    "description": (
+        "Search the web for up-to-date information using DuckDuckGo. "
+        "Use this tool for any factual claim that requires current or external data. "
+        "Returns a list of results with title, url, and snippet."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The search query string.",
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Maximum number of results to return (default: 5).",
+                "default": 5,
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+
+def search(query: str, max_results: int = 5) -> list[dict]:
+    """Search DuckDuckGo and return normalised results.
+
+    Each result dict has keys: title, url, snippet.
+    Returns an empty list if no results are found.
+    """
+    raw = DDGS().text(query, max_results=max_results)
+    return [{"title": r["title"], "url": r["href"], "snippet": r["body"]} for r in (raw or [])]

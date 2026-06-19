@@ -201,8 +201,8 @@ All events share a common envelope:
 - [x] `main.py` — FastAPI app skeleton with route stubs
 
 ### Phase 1 — Tools
-- [ ] `tools/search.py` — DuckDuckGo wrapper, unit-testable in isolation
-- [ ] `tools/executor.py` — subprocess sandbox: run code, capture stdout/stderr, enforce timeout, clean up working dir
+- [x] `tools/search.py` — DuckDuckGo wrapper, unit-testable in isolation
+- [x] `tools/executor.py` — subprocess sandbox: run code, capture stdout/stderr, enforce timeout, clean up working dir
 
 ### Phase 2 — Agents
 - [ ] `agents/planner.py` — Claude Opus call, structured output, Pydantic validation + one retry

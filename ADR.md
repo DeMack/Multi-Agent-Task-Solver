@@ -20,6 +20,7 @@
 | [ADR-010](#adr-010-code-execution-sandbox) | Code Execution Sandbox | accepted |
 | [ADR-011](#adr-011-web-search-provider) | Web Search Provider | accepted |
 | [ADR-012](#adr-012-chart-output-format) | Chart Output Format | accepted |
+| [ADR-013](#adr-013-linting-formatting--type-checking-toolchain) | Linting, Formatting & Type Checking Toolchain | accepted |
 
 ---
 
@@ -297,16 +298,18 @@ Subprocess execution with a strict timeout and restricted working directory, for
 ResearchAgent needs a search tool. Options: Brave Search API, Tavily, SerpAPI, DuckDuckGo (unofficial/free).
 
 **Decision:**
-DuckDuckGo via the `duckduckgo-search` Python library (no API key required).
+DuckDuckGo via the `ddgs` Python library (no API key required).
 
 **Reasoning:**
 - Zero signup/API key friction for reviewers running the demo locally — important for a take-home prototype.
-- The `duckduckgo-search` library is a well-maintained unofficial client.
 - Sufficient result quality for the demo use cases.
 
 **Trade-offs:**
 - Rate limits are unofficial and unpredictable. Acceptable for a demo.
 - Not suitable for production. Documented as a known trade-off in the README.
+
+**Change log:**
+- Originally used `duckduckgo-search`. During Phase 1 integration testing, the package was found to return empty results and emit a deprecation warning: it had been renamed to `ddgs`. Swapped to `ddgs>=9.0.0` with user authorisation. The import changed from `duckduckgo_search` to `ddgs`; the public API (`DDGS().text()`) is identical.
 
 **Stretch goal:**
 - Make the search provider configurable via an environment variable or config file, allowing Tavily/Brave/SerpAPI to be plugged in without code changes.
@@ -328,6 +331,38 @@ PNG file written to a per-run output directory, served as a static file by FastA
 - Serving a static file is trivial in FastAPI (`StaticFiles` mount).
 - A URL reference in the agent output keeps `TaskContext` lightweight (no large base64 blobs in memory).
 - The frontend renders it with a standard `<img>` tag.
+
+---
+
+## ADR-013: Linting, Formatting & Type Checking Toolchain
+
+**Status:** accepted
+
+**Context:**
+The project needs consistent code style, static analysis, and type checking. The Pylance extension in VS Code surfaces type errors interactively; the same checker must also be runnable in the terminal so errors can be caught and fixed before marking a task done.
+
+**Decision:**
+- **Ruff** (`ruff>=0.9.0`) for linting and formatting — replaces flake8 + isort + black.
+- **Pyright** (`pyright>=1.1.0`) for static type checking — the same engine that powers Pylance.
+
+Both are dev-only dependencies configured in `pyproject.toml`.
+
+Ruff is configured with rule sets E, F, I, W, UP (pycodestyle errors/warnings, pyflakes, isort, pyupgrade), target Python 3.13, line length 100. Pyright is configured with `venvPath = "."` and `venv = ".venv"` so it resolves packages from the project virtualenv.
+
+**Reasoning:**
+- Ruff replaces three tools with one, is significantly faster (Rust-based), and its formatter is black-compatible.
+- Pyright matches what Pylance reports in VS Code exactly — fixing `pyright` errors fixes the IDE squiggles.
+
+**Non-standard dependencies introduced:**
+
+| Package | Why required |
+|---|---|
+| `ruff` *(dev only)* | Linter and formatter. Not used at runtime. |
+| `pyright` *(dev only)* | Static type checker matching Pylance. Not used at runtime. |
+
+**Consequences:**
+- `ruff check .`, `ruff format --check .`, and `pyright src/ tests/` must all pass before any task is marked done (see AGENTS.md Definition of Done).
+- Rules and type suppressions (`# type: ignore`) may not be added without explicit user authorisation. The only accepted use is intentionally-invalid test inputs that exercise Pydantic's runtime validation.
 
 ---
 
