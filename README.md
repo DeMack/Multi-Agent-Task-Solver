@@ -73,7 +73,8 @@ Browser (SSE client)
        │  POST /task                  submit request
        │  GET  /task/{id}/stream      live events (SSE)
        │  POST /task/{id}/clarify     answer clarification questions
-       │  POST /task/{id}/message     send a mid-run steering message
+       │  POST /task/{id}/message     send a mid-run steering message (S1)
+       │  POST /task/{id}/refine      refine result after completion (S2)
        │  GET  /outputs/{file}        generated files (charts)
        ▼
 FastAPI (src/main.py)

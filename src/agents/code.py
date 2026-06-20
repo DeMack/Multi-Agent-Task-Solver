@@ -106,6 +106,9 @@ class CodeAgent:
         if context.user_messages:
             msgs = "; ".join(context.user_messages)
             parts.append(f"Updated direction from user (takes priority): {msgs}")
+        if context.prior_results:
+            last = context.prior_results[-1]
+            parts.append(f"Previous run result: {str(last)[:300]}")
         prior = {k: v for k, v in context.agent_outputs.items() if k in subtask.depends_on}
         if prior:
             parts.append(f"Context from prior agents:\n{json.dumps(prior, indent=2)}")

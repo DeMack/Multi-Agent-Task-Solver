@@ -89,6 +89,10 @@ class Planner:
         if context.user_messages:
             msgs = "\n".join(f"- {m}" for m in context.user_messages)
             parts.append(f"Updated direction from user (takes priority):\n{msgs}")
+        if context.prior_results:
+            last = context.prior_results[-1]
+            answer_preview = last.get("answer", "")[:500]
+            parts.append(f"Previous run result (use as context for refinement):\n{answer_preview}")
         return "\n\n".join(parts)
 
     @staticmethod

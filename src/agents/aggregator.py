@@ -68,5 +68,8 @@ class AggregatorAgent:
         if context.user_messages:
             msgs = "; ".join(context.user_messages)
             parts.append(f"Updated direction from user (takes priority): {msgs}")
+        if context.prior_results:
+            last = context.prior_results[-1]
+            parts.append(f"Previous run result: {str(last)[:300]}")
         parts.append(f"Agent outputs:\n{json.dumps(context.agent_outputs, indent=2)}")
         return "\n\n".join(parts)

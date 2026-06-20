@@ -21,6 +21,7 @@ from src.events import (
     close,
     drain_user_messages,
     publish,
+    save_context,
     wait_for_clarification,
 )
 from src.models import SSEEvent, SubTask, TaskContext
@@ -83,6 +84,8 @@ Most requests should be answered with CLEAR."""
     async def run(self, context: TaskContext) -> None:
         logger.info("task %s: starting — %r", context.task_id, context.original_request[:80])
         try:
+            if context.prior_results:
+                await self._emit(context.task_id, "plan_reset", {})
             await self._clarification_phase(context)
             while True:
                 await self._planning_phase(context)
@@ -97,7 +100,19 @@ Most requests should be answered with CLEAR."""
             logger.error("task %s: fatal error — %s", context.task_id, exc)
             await self._emit(context.task_id, "error", {"message": str(exc)})
         finally:
+            self._capture_prior_result(context)
+            save_context(context.task_id, context)
             await close(context.task_id)
+
+    def _capture_prior_result(self, context: TaskContext) -> None:
+        if context.plan is None:
+            return
+        for subtask in context.plan.subtasks:
+            if subtask.agent == "aggregator":
+                output = context.agent_outputs.get(subtask.id)
+                if isinstance(output, dict):
+                    context.prior_results.append(output)
+                break
 
     # --- clarification ---
 

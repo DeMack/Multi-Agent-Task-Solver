@@ -234,7 +234,7 @@
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML =
-      '<h2>Your Request</h2>' +
+      '<h2>Start a New Thread</h2>' +
       '<textarea placeholder="e.g. Summarize recent AI safety research and create a timeline chart of key milestones"></textarea>' +
       '<div class="btn-row"><button>Solve →</button></div>' +
       '<p class="input-hint">Ctrl+Enter / ⌘+Enter to submit</p>';
@@ -252,6 +252,7 @@
     card.scrollIntoView({ behavior: 'smooth', block: 'end' });
     // Small delay so the scroll finishes before focus opens the keyboard on mobile
     setTimeout(() => textarea.focus(), 300);
+    return card;
   }
 
   // ── Submit ───────────────────────────────────────────────────────────
@@ -303,7 +304,7 @@
   // Appends the progress/result cards to #conversation and returns refs.
 
   function buildSession(taskId) {
-    const session = { taskId, es: null };
+    const session = { taskId, es: null, currentInputCard: null };
     const thread  = document.getElementById('conversation');
 
     function addCard(html) {
@@ -367,6 +368,21 @@
     session.resultArtifacts = session.resultCard.querySelector('.artifacts');
     session.resultWarnings  = session.resultCard.querySelector('.result-warnings');
 
+    // Refinement (shown after result_ready)
+    session.refineCard = addCard(
+      '<h2>Refine Result</h2>' +
+      '<div class="chat-row">' +
+        '<input type="text" placeholder="e.g. make the chart a line chart, also cover 2022" />' +
+        '<button>Refine →</button>' +
+      '</div>'
+    );
+    session.refineInput = session.refineCard.querySelector('input');
+    session.refineBtn   = session.refineCard.querySelector('button');
+    session.refineBtn.onclick = () => sendRefinement(session);
+    session.refineInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendRefinement(session);
+    });
+
     return session;
   }
 
@@ -427,7 +443,10 @@
       session.chatInput.disabled = true;
       session.chatBtn.disabled   = true;
       es.close();
-      appendInputCard();
+      show(session.refineCard);
+      session.refineInput.disabled = false;
+      session.refineBtn.disabled   = false;
+      session.currentInputCard = appendInputCard();
     });
 
     es.addEventListener('error', (e) => {
@@ -480,6 +499,49 @@
       session.chatBtn.disabled   = false;
       session.chatInput.focus();
     }
+  }
+
+  async function sendRefinement(session) {
+    const msg = session.refineInput.value.trim();
+    if (!msg) return;
+
+    session.refineInput.disabled = true;
+    session.refineBtn.disabled   = true;
+    session.refineInput.value    = '';
+
+    try {
+      const res = await fetch('/task/' + session.taskId + '/refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+    } catch (err) {
+      session.refineInput.disabled = false;
+      session.refineBtn.disabled   = false;
+      showErrorCard('Could not refine: ' + err.message);
+      return;
+    }
+
+    // Remove the "Start a New Thread" card that was appended after the last result
+    if (session.currentInputCard) {
+      session.currentInputCard.remove();
+      session.currentInputCard = null;
+    }
+
+    // Reset cards for the new run
+    hide(session.refineCard);
+    hide(session.resultCard);
+    session.resultAnswer.textContent = '';
+    session.resultArtifacts.innerHTML = '';
+    session.resultWarnings.innerHTML = '';
+    session.resultWarnings.classList.add('hidden');
+    session.chatInput.disabled = false;
+    session.chatBtn.disabled   = false;
+    session.thinkingLabel.textContent = 'Replanning with your refinement…';
+    show(session.thinkingCard);
+
+    openStream(session);
   }
 
   function appendChatMsg(session, text, type) {

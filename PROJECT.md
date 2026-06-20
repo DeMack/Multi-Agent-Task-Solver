@@ -40,9 +40,12 @@ A web application that accepts a plain-language business request, breaks it into
 ```
 Browser (HTML/JS)
       │
-      │  POST /task        (submit request + clarification answers)
-      │  GET  /task/{id}/stream  (SSE — live progress events)
-      │  GET  /outputs/{file}    (static files — charts, etc.)
+      │  POST /task                (submit request + clarification answers)
+      │  GET  /task/{id}/stream        (SSE — live progress events)
+      │  POST /task/{id}/clarify       (answer clarification questions)
+      │  POST /task/{id}/message       (mid-run steering — S1)
+      │  POST /task/{id}/refine        (post-result refinement — S2)
+      │  GET  /outputs/{file}          (static files — charts, etc.)
       ▼
 ┌─────────────────────────────────────────────────────┐
 │                   FastAPI Backend                   │
@@ -164,7 +167,8 @@ class TaskContext(BaseModel):
     clarifications: list[str]
     plan: TaskGraph | None = None
     agent_outputs: dict[str, Any] = {}
-    user_messages: list[str] = []   # accumulated mid-run steering messages
+    user_messages: list[str] = []      # accumulated mid-run steering messages (S1) and refinement messages (S2)
+    prior_results: list[dict] = []     # aggregator outputs from prior runs (S2)
 ```
 
 ---
@@ -238,10 +242,12 @@ All events share a common envelope:
 
 ## Stretch Goals (not in plan above)
 
-| ID | Goal | Status |
-|---|---|---|
-| S1 | Mid-execution live conversation with orchestrator | ✅ Done |
-| S2 | Multi-turn refinement (user modifies request after output) | — |
-| S3 | ValidationAgent for hallucination checking | — |
-| S4 | Configurable search provider via env var | — |
-| S5 | Timeout extension — warn + allow user to add time | — |
+| ID | Goal | Status | ADR |
+|---|---|---|---|
+| S1 | Mid-execution live conversation with orchestrator | ✅ Done | ADR-014 |
+| S2 | Multi-turn refinement (user modifies request after output) | ✅ Done | ADR-015 |
+| S3 | ValidationAgent for hallucination checking | — | — |
+| S4 | Configurable search provider via env var | — | — |
+| S5 | Timeout extension — warn + allow user to add time | — | — |
+| S6 | Late-result reuse — when a retry starts after a timeout, monitor the original background thread; if it completes before the retry does, use its output and cancel the retry | — | — |
+| S7 | FetchAgent — full-page content retrieval to complement ResearchAgent snippets | — | — |

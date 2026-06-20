@@ -22,6 +22,7 @@
 | [ADR-012](#adr-012-chart-output-format) | Chart Output Format | accepted |
 | [ADR-013](#adr-013-linting-formatting--type-checking-toolchain) | Linting, Formatting & Type Checking Toolchain | accepted |
 | [ADR-014](#adr-014-mid-run-steering-s1) | Mid-Run Steering (S1) | accepted |
+| [ADR-015](#adr-015-post-result-refinement-s2) | Post-Result Refinement (S2) | accepted |
 
 ---
 
@@ -420,13 +421,38 @@ This is consistent with ADR-008/009: bidirectional user input travels via REST e
 
 ---
 
-## Stretch Goals Backlog
+## ADR-015: Post-Result Refinement (S2)
 
-| # | Goal | Status | Depends on |
-|---|---|---|---|
-| S1 | Mid-execution live conversation with orchestrator | ✅ Done — see ADR-014 | ADR-008 |
-| S2 | Multi-turn refinement (user modifies request after output) | — | Core flow |
-| S3 | ValidationAgent for hallucination checking | — | Core agents |
-| S4 | Configurable search provider (env var / config) | — | ADR-011 |
-| S5 | Timeout extension — warn user before expiry, allow extension | — | ADR-010 |
-| S6 | FetchAgent — full-page content retrieval to complement ResearchAgent snippets | — | ADR-005, ADR-011 |
+**Status:** accepted
+
+**Context:**
+S1 (ADR-014) enables steering while a pipeline is running. S2 extends interactivity to the post-completion case: after `result_ready`, the user can submit a follow-up message ("make the chart a line chart", "also cover 2022") to trigger a new pipeline run that is aware of what was already produced.
+
+**Decision:**
+Three interlocking decisions, each described below.
+
+### 1. Context store separate from the event queue
+
+The event queue (`_queues`) is ephemeral — it is created per run and removed by `cleanup()` when the SSE stream closes. Task context must survive this cleanup to be retrievable for a refinement request.
+
+A separate `_context_store: dict[str, TaskContext]` in `events.py` holds completed contexts. `cleanup()` is not changed; a distinct `cleanup_context()` function exists for explicit removal but is not called automatically. The orchestrator calls `save_context(task_id, context)` in its `finally` block before `close()`, so the context is always persisted regardless of whether the run succeeded or failed.
+
+**Why not persist the queue:** The queue is an `asyncio.Queue` and is meaningless once the SSE stream closes. The context is a plain Pydantic model — cheap to keep in memory.
+
+### 2. `prior_results` accumulation on `TaskContext`
+
+A new field `prior_results: list[dict]` accumulates each run's aggregated output. The orchestrator appends the aggregator's dict output to this list before saving the context.
+
+The Planner and all four agent types include the most recent entry from `prior_results` in their prompts. This lets the Planner generate a targeted plan ("only redo the chart subtask") rather than always starting from scratch, and agents understand what was previously produced.
+
+`user_messages` (introduced in S1) is reused for refinement messages — the refinement message is appended to the same list before the new run starts. The Planner and agents already include `user_messages` in their prompts, so updated intent flows through automatically.
+
+### 3. `POST /task/{id}/refine` resets plan and outputs but preserves context history
+
+`POST /task/{id}/refine` loads the saved context, appends the refinement message to `user_messages`, resets `plan` and `agent_outputs`, and launches a new orchestrator run. `prior_results` and `clarifications` are preserved — clarifications are not re-asked, and all prior results remain available as context.
+
+**Why reset plan/agent_outputs:** A refinement run should re-plan with the new intent rather than attempt to resume a completed plan. The Planner, informed by `prior_results` and the refinement message, can produce a targeted plan (e.g., skip research if the user only changed the chart type).
+
+**No new SSE events:** The refinement run emits the same event sequence as the first run (`plan_reset` → `plan_ready` → agent events → `result_ready`). `plan_reset` is emitted at the start of any run where `prior_results` is non-empty, so the UI clears stale subtask rows before rebuilding. The frontend reconnects to `GET /task/{id}/stream` after calling `/refine` and handles the second run with the same event handlers.
+
+> Stretch goal status and backlog are tracked in `PROJECT.md`.

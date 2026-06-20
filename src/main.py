@@ -11,12 +11,21 @@ from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 from src.config import config
-from src.events import cleanup, create_queue, get_queue, submit_clarification, submit_user_message
+from src.events import (
+    cleanup,
+    create_queue,
+    get_context,
+    get_queue,
+    submit_clarification,
+    submit_user_message,
+)
 from src.models import (
     ClarifyRequest,
     ClarifyResponse,
     CreateTaskRequest,
     CreateTaskResponse,
+    RefineRequest,
+    RefineResponse,
     TaskContext,
     UserMessageRequest,
     UserMessageResponse,
@@ -72,6 +81,19 @@ async def create_task(body: CreateTaskRequest) -> CreateTaskResponse:
 async def clarify_task(task_id: str, body: ClarifyRequest) -> ClarifyResponse:
     submit_clarification(task_id, body.answers)
     return ClarifyResponse(task_id=task_id, status="resumed")
+
+
+@app.post("/task/{task_id}/refine", response_model=RefineResponse)
+async def refine_task(task_id: str, body: RefineRequest) -> RefineResponse:
+    context = get_context(task_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Task not found or expired")
+    context.user_messages.append(body.message)
+    context.plan = None
+    context.agent_outputs = {}
+    create_queue(task_id)
+    asyncio.create_task(Orchestrator(_client, config).run(context))
+    return RefineResponse(task_id=task_id, status="pending")
 
 
 @app.post("/task/{task_id}/message", response_model=UserMessageResponse)

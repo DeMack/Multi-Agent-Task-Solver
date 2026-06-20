@@ -1,11 +1,16 @@
 import asyncio
+from typing import TYPE_CHECKING
 
 from src.models import SSEEvent
+
+if TYPE_CHECKING:
+    from src.models import TaskContext
 
 _queues: dict[str, asyncio.Queue[SSEEvent | None]] = {}
 _clarify_events: dict[str, asyncio.Event] = {}
 _clarify_answers: dict[str, list[str]] = {}
 _user_messages: dict[str, list[str]] = {}
+_context_store: dict[str, "TaskContext"] = {}
 
 
 def create_queue(task_id: str) -> None:
@@ -49,6 +54,18 @@ def drain_user_messages(task_id: str) -> list[str]:
     return drained
 
 
+def save_context(task_id: str, context: "TaskContext") -> None:
+    _context_store[task_id] = context
+
+
+def get_context(task_id: str) -> "TaskContext | None":
+    return _context_store.get(task_id)
+
+
+def cleanup_context(task_id: str) -> None:
+    _context_store.pop(task_id, None)
+
+
 def cleanup(task_id: str) -> None:
     _queues.pop(task_id, None)
     _clarify_events.pop(task_id, None)
@@ -83,3 +100,4 @@ def _reset() -> None:
     _clarify_events.clear()
     _clarify_answers.clear()
     _user_messages.clear()
+    _context_store.clear()

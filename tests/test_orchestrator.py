@@ -7,7 +7,13 @@ import pytest
 
 import src.events as events_mod
 from src.config import Config
-from src.events import create_queue, get_queue, submit_clarification, submit_user_message
+from src.events import (
+    create_queue,
+    get_context,
+    get_queue,
+    submit_clarification,
+    submit_user_message,
+)
 from src.models import SSEEvent, SubTask, TaskContext, TaskGraph
 from src.orchestrator import Orchestrator
 
@@ -711,3 +717,77 @@ async def test_run_keeps_reused_subtask_and_skips_pending(mock_planner_class: Ma
 
     mock_research.return_value.run.assert_called_once()
     mock_summary.return_value.run.assert_not_called()
+
+
+# --- S2: multi-turn refinement ---
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_saves_context_after_completion(mock_planner_class: MagicMock):
+    """After run() completes, get_context returns the TaskContext."""
+    mock_planner_class.return_value.plan.return_value = _simple_graph()
+    ctx = _context()
+    create_queue(ctx.task_id)
+
+    with patch("src.orchestrator.AggregatorAgent") as mock_agg:
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(_clear_client(), _config()).run(ctx)
+
+    saved = get_context(ctx.task_id)
+    assert saved is ctx
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_appends_aggregator_output_to_prior_results(mock_planner_class: MagicMock):
+    """A successful run appends the aggregator's dict output to context.prior_results."""
+    mock_planner_class.return_value.plan.return_value = _simple_graph()
+    ctx = _context()
+    create_queue(ctx.task_id)
+
+    agg_output = {"answer": "42", "artifacts": [], "warnings": []}
+    with patch("src.orchestrator.AggregatorAgent") as mock_agg:
+        mock_agg.return_value.run.return_value = agg_output
+        await Orchestrator(_clear_client(), _config()).run(ctx)
+
+    assert ctx.prior_results == [agg_output]
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_prior_results_accumulates_across_refinement_runs(
+    mock_planner_class: MagicMock,
+):
+    """Each run appends its result; prior runs' results are preserved."""
+    mock_planner_class.return_value.plan.return_value = _simple_graph()
+    ctx = _context()
+    ctx.prior_results = [{"answer": "first run", "artifacts": [], "warnings": []}]
+    ctx.clarifications = ["N/A"]  # skip clarification phase
+    create_queue(ctx.task_id)
+
+    agg_output = {"answer": "second run", "artifacts": [], "warnings": []}
+    with patch("src.orchestrator.AggregatorAgent") as mock_agg:
+        mock_agg.return_value.run.return_value = agg_output
+        await Orchestrator(_clear_client(), _config()).run(ctx)
+
+    assert len(ctx.prior_results) == 2
+    assert ctx.prior_results[1] == agg_output
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_emits_plan_reset_before_plan_ready_on_refinement(
+    mock_planner_class: MagicMock,
+):
+    """When prior_results is non-empty (refinement run), plan_reset precedes plan_ready."""
+    mock_planner_class.return_value.plan.return_value = _simple_graph()
+    ctx = _context()
+    ctx.prior_results = [{"answer": "first run", "artifacts": [], "warnings": []}]
+    ctx.clarifications = ["N/A"]
+    create_queue(ctx.task_id)
+
+    with patch("src.orchestrator.AggregatorAgent") as mock_agg:
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(_clear_client(), _config()).run(ctx)
+
+    events = await _drain(ctx.task_id)
+    types = [e.event for e in events]
+    assert "plan_reset" in types
+    assert types.index("plan_reset") < types.index("plan_ready")

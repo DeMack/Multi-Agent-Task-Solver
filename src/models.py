@@ -21,6 +21,7 @@ class TaskContext(BaseModel):
     plan: TaskGraph | None = None
     agent_outputs: dict[str, Any] = {}
     user_messages: list[str] = []
+    prior_results: list[dict] = []
 
 
 # API request / response models
@@ -50,6 +51,15 @@ class UserMessageRequest(BaseModel):
 
 
 class UserMessageResponse(BaseModel):
+    task_id: str
+    status: str
+
+
+class RefineRequest(BaseModel):
+    message: str
+
+
+class RefineResponse(BaseModel):
     task_id: str
     status: str
 

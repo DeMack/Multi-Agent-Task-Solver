@@ -7,9 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.events as events_mod
-from src.events import arm_user_messages, create_queue, get_queue, publish
+from src.events import arm_user_messages, create_queue, get_queue, publish, save_context
 from src.main import app
-from src.models import SSEEvent
+from src.models import SSEEvent, TaskContext
 
 client = TestClient(app)
 
@@ -199,4 +199,68 @@ def test_message_route_calls_submit_user_message():
 
 def test_message_route_rejects_missing_message_field():
     response = client.post("/task/some-id/message", json={})
+    assert response.status_code == 422
+
+
+# --- S2: multi-turn refinement ---
+
+
+def _saved_context(task_id: str = "ref-task") -> TaskContext:
+    ctx = TaskContext(
+        task_id=task_id,
+        original_request="Research AI",
+        clarifications=["N/A"],
+        prior_results=[{"answer": "first result", "artifacts": [], "warnings": []}],
+    )
+    save_context(task_id, ctx)
+    return ctx
+
+
+def test_refine_returns_404_for_unknown_task():
+    response = client.post("/task/nonexistent/refine", json={"message": "change the chart"})
+    assert response.status_code == 404
+
+
+def test_refine_appends_message_to_context_and_relaunches_orchestrator():
+    ctx = _saved_context()
+    create_queue(ctx.task_id)
+
+    with patch("src.main.Orchestrator") as mock_orch:
+        mock_orch.return_value.run = AsyncMock()
+        response = client.post(f"/task/{ctx.task_id}/refine", json={"message": "use a line chart"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+    assert "use a line chart" in ctx.user_messages
+    mock_orch.return_value.run.assert_called_once()
+
+
+def test_refine_resets_plan_and_agent_outputs():
+    ctx = _saved_context()
+    ctx.plan = None  # already None, but confirm refine resets these
+    ctx.agent_outputs = {"t1": "stale output"}
+    create_queue(ctx.task_id)
+
+    with patch("src.main.Orchestrator") as mock_orch:
+        mock_orch.return_value.run = AsyncMock()
+        client.post(f"/task/{ctx.task_id}/refine", json={"message": "change something"})
+
+    assert ctx.plan is None
+    assert ctx.agent_outputs == {}
+
+
+def test_refine_preserves_prior_results_on_context():
+    ctx = _saved_context()
+    create_queue(ctx.task_id)
+
+    with patch("src.main.Orchestrator") as mock_orch:
+        mock_orch.return_value.run = AsyncMock()
+        client.post(f"/task/{ctx.task_id}/refine", json={"message": "refine it"})
+
+    assert len(ctx.prior_results) == 1
+    assert ctx.prior_results[0]["answer"] == "first result"
+
+
+def test_refine_rejects_missing_message_field():
+    response = client.post("/task/some-id/refine", json={})
     assert response.status_code == 422
