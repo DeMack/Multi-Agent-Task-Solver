@@ -47,8 +47,11 @@ All settings are read from environment variables at startup.
 ## Running tests
 
 ```bash
-# Unit tests only (no API calls, fast)
+# Unit tests only (no API calls, fast) — coverage report printed to terminal
 pytest
+
+# Open HTML coverage report in browser
+open htmlcov/index.html
 
 # Include integration tests (calls real Anthropic API, takes several minutes)
 pytest --integration
