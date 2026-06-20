@@ -162,9 +162,9 @@ class TaskContext(BaseModel):
     task_id: str
     original_request: str
     clarifications: list[str]
-    plan: TaskGraph | None
-    agent_outputs: dict[str, Any]
-    status: dict[str, TaskStatus]
+    plan: TaskGraph | None = None
+    agent_outputs: dict[str, Any] = {}
+    user_messages: list[str] = []   # accumulated mid-run steering messages
 ```
 
 ---
@@ -189,7 +189,11 @@ All events share a common envelope:
 | `agent_started` | `subtask_id`, `agent`, `description` |
 | `agent_completed` | `subtask_id`, `agent`, `summary` (brief text), `has_artifact: bool` |
 | `agent_failed` | `subtask_id`, `agent`, `error` |
-| `result_ready` | `result: {answer: str, artifacts: list[{type, url}]}` |
+| `agent_skipped` | `subtask_id` |
+| `agent_restarted` | `subtask_id` |
+| `user_message_ack` | `acknowledgment: str`, `reuse_plan: bool`, `restarted_subtask_ids: list[str]`, `skipped_subtask_ids: list[str]` |
+| `plan_reset` | *(empty — signals UI to clear plan before second `plan_ready`)* |
+| `result_ready` | `result: {answer: str, artifacts: list[{type, url}], warnings: list[str]}` |
 
 ---
 
@@ -234,10 +238,10 @@ All events share a common envelope:
 
 ## Stretch Goals (not in plan above)
 
-| ID | Goal |
-|---|---|
-| S1 | Mid-execution live conversation with orchestrator |
-| S2 | Multi-turn refinement (user modifies request after output) |
-| S3 | ValidationAgent for hallucination checking |
-| S4 | Configurable search provider via env var |
-| S5 | Timeout extension — warn + allow user to add time |
+| ID | Goal | Status |
+|---|---|---|
+| S1 | Mid-execution live conversation with orchestrator | ✅ Done |
+| S2 | Multi-turn refinement (user modifies request after output) | — |
+| S3 | ValidationAgent for hallucination checking | — |
+| S4 | Configurable search provider via env var | — |
+| S5 | Timeout extension — warn + allow user to add time | — |

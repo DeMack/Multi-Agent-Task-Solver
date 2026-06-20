@@ -20,6 +20,7 @@ class TaskContext(BaseModel):
     clarifications: list[str]
     plan: TaskGraph | None = None
     agent_outputs: dict[str, Any] = {}
+    user_messages: list[str] = []
 
 
 # API request / response models
@@ -40,6 +41,15 @@ class ClarifyRequest(BaseModel):
 
 
 class ClarifyResponse(BaseModel):
+    task_id: str
+    status: str
+
+
+class UserMessageRequest(BaseModel):
+    message: str
+
+
+class UserMessageResponse(BaseModel):
     task_id: str
     status: str
 

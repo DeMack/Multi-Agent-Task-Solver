@@ -6,11 +6,15 @@ import pytest
 import src.events as events_mod
 from src.events import (
     arm_clarification,
+    arm_user_messages,
+    cleanup,
     close,
     create_queue,
+    drain_user_messages,
     get_queue,
     publish,
     submit_clarification,
+    submit_user_message,
     wait_for_clarification,
 )
 from src.models import SSEEvent
@@ -112,3 +116,40 @@ async def test_wait_for_clarification_times_out():
 
 def test_submit_clarification_without_arm_does_not_raise():
     submit_clarification("t1", ["answer"])
+
+
+# --- user messages ---
+
+
+def test_submit_user_message_returns_false_when_not_armed():
+    assert submit_user_message("t1", "hello") is False
+
+
+def test_arm_user_messages_enables_submit():
+    arm_user_messages("t1")
+    assert submit_user_message("t1", "hello") is True
+
+
+def test_drain_user_messages_returns_all_queued_messages():
+    arm_user_messages("t1")
+    submit_user_message("t1", "first")
+    submit_user_message("t1", "second")
+    assert drain_user_messages("t1") == ["first", "second"]
+
+
+def test_drain_user_messages_clears_after_drain():
+    arm_user_messages("t1")
+    submit_user_message("t1", "hello")
+    drain_user_messages("t1")
+    assert drain_user_messages("t1") == []
+
+
+def test_drain_user_messages_returns_empty_when_not_armed():
+    assert drain_user_messages("t1") == []
+
+
+def test_cleanup_removes_user_message_state():
+    arm_user_messages("t1")
+    submit_user_message("t1", "hello")
+    cleanup("t1")
+    assert submit_user_message("t1", "new") is False

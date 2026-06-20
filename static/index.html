@@ -187,6 +187,26 @@
       font-size: 0.78rem; color: var(--muted);
       margin-top: 0.5rem; text-align: right;
     }
+
+    /* ── Mid-run chat ── */
+    .chat-thread {
+      display: flex; flex-direction: column; gap: 0.5rem;
+      margin-bottom: 0.75rem; max-height: 220px; overflow-y: auto;
+    }
+    .chat-msg {
+      font-size: 0.875rem; line-height: 1.5; padding: 0.5rem 0.75rem;
+      border-radius: var(--radius); max-width: 85%; word-break: break-word;
+    }
+    .chat-msg.user {
+      background: var(--accent-dk); color: #fff; align-self: flex-end;
+    }
+    .chat-msg.ack {
+      background: var(--surface-2); color: var(--muted);
+      align-self: flex-start; border: 1px solid var(--border);
+    }
+    .chat-row { display: flex; gap: 0.5rem; align-items: center; }
+    .chat-row input { flex: 1; }
+    .chat-row button { flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -319,6 +339,23 @@
     session.planCard = addCard('<h2>Agent Progress</h2><div class="subtask-list"></div>');
     session.subtaskList = session.planCard.querySelector('.subtask-list');
 
+    // Mid-run chat
+    session.chatCard = addCard(
+      '<h2>Steer Agents</h2>' +
+      '<div class="chat-thread hidden"></div>' +
+      '<div class="chat-row">' +
+        '<input type="text" placeholder="e.g. skip the chart, focus on the last 5 years" />' +
+        '<button>Send</button>' +
+      '</div>'
+    );
+    session.chatThread = session.chatCard.querySelector('.chat-thread');
+    session.chatInput  = session.chatCard.querySelector('input');
+    session.chatBtn    = session.chatCard.querySelector('button');
+    session.chatBtn.onclick = () => sendUserMessage(session);
+    session.chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendUserMessage(session);
+    });
+
     // Result
     session.resultCard = addCard(
       '<h2>Result</h2>' +
@@ -345,9 +382,15 @@
       showClarification(session, questions);
     });
 
+    es.addEventListener('plan_reset', () => {
+      // Pipeline is replanning — renderPlan will clear and rebuild rows on next plan_ready
+      hide(session.chatCard);
+    });
+
     es.addEventListener('plan_ready', (e) => {
       hide(session.thinkingCard);
       renderPlan(session, parseData(e).subtasks);
+      show(session.chatCard);
     });
 
     es.addEventListener('agent_started', (e) => {
@@ -364,13 +407,33 @@
       setStatus(session, subtask_id, 'failed', error);
     });
 
+    es.addEventListener('agent_skipped', (e) => {
+      setStatus(session, parseData(e).subtask_id, 'skipped');
+    });
+
+    es.addEventListener('agent_restarted', (e) => {
+      setStatus(session, parseData(e).subtask_id, 'pending');
+    });
+
+    es.addEventListener('user_message_ack', (e) => {
+      const { acknowledgment, restarted_subtask_ids, skipped_subtask_ids } = parseData(e);
+      appendChatMsg(session, acknowledgment, 'ack');
+      (restarted_subtask_ids || []).forEach((sid) => setStatus(session, sid, 'pending'));
+      (skipped_subtask_ids || []).forEach((sid) => setStatus(session, sid, 'skipped'));
+    });
+
     es.addEventListener('result_ready', (e) => {
       renderResult(session, parseData(e).result);
+      session.chatInput.disabled = true;
+      session.chatBtn.disabled   = true;
       es.close();
       appendInputCard();
     });
 
     es.addEventListener('error', (e) => {
+      // e.data is only present on server-sent 'event: error' messages.
+      // Connection-level errors arrive here too but have no data — let onerror handle those.
+      if (!e.data) return;
       hide(session.thinkingCard);
       try {
         const { message } = parseData(e);
@@ -383,14 +446,50 @@
     });
 
     es.onerror = () => {
-      // Fires on normal close too — only surface an error if we have no result
       if (!session.resultCard.classList.contains('hidden')) return;
+      hide(session.thinkingCard);
       es.close();
       appendInputCard();
     };
   }
 
   function parseData(e) { return JSON.parse(e.data).data; }
+
+  // ── Mid-run chat ─────────────────────────────────────────────────────
+
+  async function sendUserMessage(session) {
+    const msg = session.chatInput.value.trim();
+    if (!msg) return;
+
+    session.chatInput.disabled = true;
+    session.chatBtn.disabled   = true;
+    session.chatInput.value    = '';
+    appendChatMsg(session, msg, 'user');
+
+    try {
+      const res = await fetch('/task/' + session.taskId + '/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+    } catch (err) {
+      appendChatMsg(session, 'Could not send: ' + err.message, 'ack');
+    } finally {
+      session.chatInput.disabled = false;
+      session.chatBtn.disabled   = false;
+      session.chatInput.focus();
+    }
+  }
+
+  function appendChatMsg(session, text, type) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg ' + type;
+    el.textContent = text;
+    session.chatThread.appendChild(el);
+    show(session.chatThread);
+    session.chatThread.scrollTop = session.chatThread.scrollHeight;
+  }
 
   // ── Clarification ────────────────────────────────────────────────────
 
@@ -450,6 +549,7 @@
     const row = session.subtaskList.querySelector('[data-id="' + id + '"]');
     if (!row) return;
     const badges = {
+      pending: '<span class="badge badge-pending">Pending</span>',
       running: '<span class="badge badge-running"><span class="spinner"></span> Running</span>',
       done:    '<span class="badge badge-done">✓ Done</span>',
       failed:  '<span class="badge badge-failed">✗ Failed</span>',

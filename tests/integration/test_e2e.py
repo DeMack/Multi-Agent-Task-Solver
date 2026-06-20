@@ -14,8 +14,8 @@ from anthropic import Anthropic
 
 import src.events as events_mod
 from src.config import config
-from src.events import create_queue, get_queue
-from src.models import TaskContext
+from src.events import arm_user_messages, create_queue, get_queue
+from src.models import SubTask, TaskContext, TaskGraph
 from src.orchestrator import Orchestrator
 
 pytestmark = pytest.mark.skipif(
@@ -93,3 +93,67 @@ async def test_full_pipeline_summary_with_chart():
     assert len(result["answer"]) > 20, "result.answer is suspiciously short"
     assert isinstance(result.get("artifacts"), list), "result.artifacts must be a list"
     assert isinstance(result.get("warnings"), list), "result.warnings must be a list"
+
+
+@pytest.mark.integration
+async def test_handle_user_message_calls_claude_and_returns_ack():
+    """
+    Verifies the mid-run message path makes a real Claude API call and returns
+    a valid acknowledgment. Calls _handle_user_messages directly to avoid
+    timing-dependent injection during a live execution.
+    """
+    client = Anthropic()
+    task_id = "msg-" + uuid.uuid4().hex[:8]
+    create_queue(task_id)
+    arm_user_messages(task_id)
+
+    context = TaskContext(
+        task_id=task_id,
+        original_request="Research AI trends and create a bar chart",
+        clarifications=[],
+        plan=TaskGraph(
+            subtasks=[
+                SubTask(id="t1", description="research AI trends", agent="research", depends_on=[]),
+                SubTask(id="t2", description="create bar chart", agent="code", depends_on=["t1"]),
+                SubTask(id="t3", description="aggregate", agent="aggregator", depends_on=["t2"]),
+            ]
+        ),
+    )
+
+    orch = Orchestrator(client, config)
+    directive = await orch._handle_user_messages(
+        messages=["skip the chart, I only need the research summary"],
+        context=context,
+        pending={"t2", "t3"},
+        completed={"t1"},
+    )
+
+    # Drain SSE queue to find the ack event
+    q = get_queue(task_id)
+    assert q is not None
+    events = []
+    while not q.empty():
+        item = await q.get()
+        if item is not None:
+            events.append(item)
+
+    assert isinstance(directive.acknowledgment, str)
+    assert len(directive.acknowledgment) > 0
+
+    # Drain SSE queue to find the ack event
+    q = get_queue(task_id)
+    assert q is not None
+    events = []
+    while not q.empty():
+        item = await q.get()
+        if item is not None:
+            events.append(item)
+
+    ack_events = [e for e in events if e.event == "user_message_ack"]
+    assert len(ack_events) == 1, f"Expected 1 user_message_ack, got: {[e.event for e in events]}"
+    ack = ack_events[0].data
+    assert isinstance(ack["acknowledgment"], str)
+    assert len(ack["acknowledgment"]) > 0
+    assert isinstance(ack["reuse_plan"], bool)
+    assert isinstance(ack["restarted_subtask_ids"], list)
+    assert isinstance(ack["skipped_subtask_ids"], list)

@@ -67,10 +67,11 @@ pyright src/
 ```
 Browser (SSE client)
        │
-       │  POST /task           submit request
-       │  GET  /task/{id}/stream   live events (SSE)
-       │  POST /task/{id}/clarify  answer clarification questions
-       │  GET  /outputs/{file}     generated files (charts)
+       │  POST /task                  submit request
+       │  GET  /task/{id}/stream      live events (SSE)
+       │  POST /task/{id}/clarify     answer clarification questions
+       │  POST /task/{id}/message     send a mid-run steering message
+       │  GET  /outputs/{file}        generated files (charts)
        ▼
 FastAPI (src/main.py)
        │
@@ -95,7 +96,9 @@ Agents:
 
 SSE events (in order):
   clarification_needed → plan_ready → agent_started / agent_completed /
-  agent_failed (×N) → result_ready
+  agent_failed / agent_skipped / agent_restarted (×N) →
+  [user_message_ack / plan_reset / plan_ready (on steer)] →
+  result_ready
 ```
 
 ## 24h trade-offs

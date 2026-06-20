@@ -65,5 +65,8 @@ class AggregatorAgent:
         parts = [f"Original request: {context.original_request}"]
         if context.clarifications:
             parts.append(f"Clarifications: {'; '.join(context.clarifications)}")
+        if context.user_messages:
+            msgs = "; ".join(context.user_messages)
+            parts.append(f"Updated direction from user (takes priority): {msgs}")
         parts.append(f"Agent outputs:\n{json.dumps(context.agent_outputs, indent=2)}")
         return "\n\n".join(parts)

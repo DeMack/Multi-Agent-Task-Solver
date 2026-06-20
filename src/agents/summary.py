@@ -32,6 +32,9 @@ class SummaryAgent:
 
     def _build_prompt(self, subtask: SubTask, context: TaskContext) -> str:
         parts = [f"Summary task: {subtask.description}"]
+        if context.user_messages:
+            msgs = "; ".join(context.user_messages)
+            parts.append(f"Updated direction from user (takes priority): {msgs}")
         prior = {k: v for k, v in context.agent_outputs.items() if k in subtask.depends_on}
         if prior:
             parts.append(f"Inputs:\n{json.dumps(prior, indent=2)}")

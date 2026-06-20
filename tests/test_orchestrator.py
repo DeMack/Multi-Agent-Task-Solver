@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -6,7 +7,7 @@ import pytest
 
 import src.events as events_mod
 from src.config import Config
-from src.events import create_queue, get_queue, submit_clarification
+from src.events import create_queue, get_queue, submit_clarification, submit_user_message
 from src.models import SSEEvent, SubTask, TaskContext, TaskGraph
 from src.orchestrator import Orchestrator
 
@@ -333,3 +334,380 @@ async def test_run_respects_subtask_dependencies(mock_planner_class: MagicMock):
 
     assert execution_order.index("t1") < execution_order.index("t2")
     assert execution_order.index("t2") < execution_order.index("t3")
+
+
+# --- S1: mid-run user messages ---
+
+
+def _steer_payload(
+    acknowledgment: str,
+    reuse_plan: bool = True,
+    reuse_ids: list[str] | None = None,
+    skip_ids: list[str] | None = None,
+) -> str:
+    return json.dumps(
+        {
+            "acknowledgment": acknowledgment,
+            "reuse_plan": reuse_plan,
+            "reuse_subtask_ids": reuse_ids or [],
+            "skip_subtask_ids": skip_ids or [],
+        }
+    )
+
+
+def _clear_then_message_client(
+    acknowledgment: str,
+    skip_ids: list[str],
+    *,
+    reuse_plan: bool = True,
+    reuse_ids: list[str] | None = None,
+    fenced: bool = False,
+) -> MagicMock:
+    """Client mock: first call returns CLEAR (clarification), second returns steer directive."""
+    clear_block = MagicMock()
+    clear_block.type = "text"
+    clear_block.text = "CLEAR"
+    clear_resp = MagicMock()
+    clear_resp.content = [clear_block]
+
+    raw = _steer_payload(acknowledgment, reuse_plan, reuse_ids, skip_ids)
+    msg_block = MagicMock()
+    msg_block.type = "text"
+    msg_block.text = f"```json\n{raw}\n```" if fenced else raw
+    msg_resp = MagicMock()
+    msg_resp.content = [msg_block]
+
+    mock = MagicMock()
+    mock.messages.create.side_effect = [clear_resp, msg_resp]
+    return mock
+
+
+def _steer_client(
+    acknowledgment: str,
+    *,
+    reuse_plan: bool = True,
+    reuse_ids: list[str] | None = None,
+    skip_ids: list[str] | None = None,
+    fenced: bool = False,
+) -> MagicMock:
+    """Single-call steer client — no CLEAR step. Use with pre-clarified context."""
+    raw = _steer_payload(acknowledgment, reuse_plan, reuse_ids, skip_ids)
+    block = MagicMock()
+    block.type = "text"
+    block.text = f"```json\n{raw}\n```" if fenced else raw
+    resp = MagicMock()
+    resp.content = [block]
+    mock = MagicMock()
+    mock.messages.create.return_value = resp
+    return mock
+
+
+def _pre_clarified_context(request: str = "What is AI?") -> TaskContext:
+    """Context with clarifications pre-set so the CLEAR API call is skipped."""
+    return TaskContext(task_id="test-task", original_request=request, clarifications=["N/A"])
+
+
+def _linear_graph() -> TaskGraph:
+    return TaskGraph(
+        subtasks=[
+            SubTask(id="t1", description="research", agent="research", depends_on=[]),
+            SubTask(id="t2", description="summary", agent="summary", depends_on=["t1"]),
+            SubTask(id="t3", description="aggregate", agent="aggregator", depends_on=["t2"]),
+        ]
+    )
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_emits_user_message_ack_when_message_received(mock_planner_class: MagicMock):
+    mock_planner_class.return_value.plan.return_value = _research_graph()
+    ctx = _context()
+    create_queue(ctx.task_id)
+
+    def research_and_message(*_args):
+        submit_user_message(ctx.task_id, "just checking in")
+        return "findings"
+
+    mock_client = _clear_then_message_client("Got it, continuing.", [])
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_and_message
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(mock_client, _config()).run(ctx)
+
+    events = await _drain(ctx.task_id)
+    ack_evts = [e for e in events if e.event == "user_message_ack"]
+    assert len(ack_evts) == 1
+    assert ack_evts[0].data["acknowledgment"] == "Got it, continuing."
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_skips_subtask_and_emits_agent_skipped(mock_planner_class: MagicMock):
+    mock_planner_class.return_value.plan.return_value = _linear_graph()
+    ctx = _context()
+    create_queue(ctx.task_id)
+
+    def research_and_request_skip(*_args):
+        submit_user_message(ctx.task_id, "skip the summary")
+        return "findings"
+
+    mock_client = _clear_then_message_client("Skipping the summary.", ["t2"])
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.SummaryAgent") as mock_summary,
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_and_request_skip
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(mock_client, _config()).run(ctx)
+
+    mock_summary.return_value.run.assert_not_called()
+
+    events = await _drain(ctx.task_id)
+    skipped_evts = [e for e in events if e.event == "agent_skipped"]
+    assert len(skipped_evts) == 1
+    assert skipped_evts[0].data["subtask_id"] == "t2"
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_handles_fenced_json_in_message_response(mock_planner_class: MagicMock):
+    mock_planner_class.return_value.plan.return_value = _research_graph()
+    ctx = _context()
+    create_queue(ctx.task_id)
+
+    def research_and_message(*_args):
+        submit_user_message(ctx.task_id, "just checking in")
+        return "findings"
+
+    mock_client = _clear_then_message_client("Got it, continuing.", [], fenced=True)
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_and_message
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(mock_client, _config()).run(ctx)
+
+    events = await _drain(ctx.task_id)
+    ack_evts = [e for e in events if e.event == "user_message_ack"]
+    assert len(ack_evts) == 1
+    assert ack_evts[0].data["acknowledgment"] == "Got it, continuing."
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_does_not_skip_aggregator_even_if_requested(mock_planner_class: MagicMock):
+    """Aggregator must always run; skip requests for it are silently ignored."""
+    mock_planner_class.return_value.plan.return_value = _linear_graph()
+    ctx = _context()
+    create_queue(ctx.task_id)
+
+    def research_and_request_skip_all(*_args):
+        submit_user_message(ctx.task_id, "skip everything")
+        return "findings"
+
+    mock_client = _clear_then_message_client("Skipping remaining tasks.", ["t2", "t3"])
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.SummaryAgent"),
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_and_request_skip_all
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(mock_client, _config()).run(ctx)
+
+    mock_agg.return_value.run.assert_called_once()
+    events = await _drain(ctx.task_id)
+    assert any(e.event == "result_ready" for e in events)
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_skipped_subtask_does_not_block_downstream(mock_planner_class: MagicMock):  # noqa: E501
+    """A skipped subtask is treated as completed so its dependents can still run."""
+    mock_planner_class.return_value.plan.return_value = _linear_graph()
+    ctx = _context()
+    create_queue(ctx.task_id)
+
+    def research_and_request_skip(*_args):
+        submit_user_message(ctx.task_id, "skip the summary")
+        return "findings"
+
+    mock_client = _clear_then_message_client("Skipping the summary.", ["t2"])
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.SummaryAgent"),
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_and_request_skip
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(mock_client, _config()).run(ctx)
+
+    mock_agg.return_value.run.assert_called_once()
+
+
+# --- S1: restart-with-reuse tests ---
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_accumulates_user_messages_in_context(mock_planner_class: MagicMock):
+    """Messages sent mid-run are stored on context.user_messages for downstream use."""
+    mock_planner_class.return_value.plan.return_value = _research_graph()
+    ctx = _pre_clarified_context()
+    create_queue(ctx.task_id)
+
+    def research_and_message(*_args):
+        submit_user_message(ctx.task_id, "pivot to WW1")
+        return "findings"
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_and_message
+        mock_agg.return_value.run.return_value = _agg_result()
+        # reuse_ids=["t1"] keeps research output so the loop doesn't restart indefinitely
+        await Orchestrator(_steer_client("Got it.", reuse_ids=["t1"]), _config()).run(ctx)
+
+    assert ctx.user_messages == ["pivot to WW1"]
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_replans_when_directive_says_reuse_plan_false(mock_planner_class: MagicMock):
+    """When reuse_plan=false, the pipeline re-plans before re-executing."""
+    mock_planner_class.return_value.plan.side_effect = [_research_graph(), _simple_graph()]
+    ctx = _pre_clarified_context()
+    create_queue(ctx.task_id)
+
+    def research_and_trigger(*_args):
+        submit_user_message(ctx.task_id, "pivot to WW1")
+        return "findings"
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_and_trigger
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(_steer_client("Restarting for WW1.", reuse_plan=False), _config()).run(
+            ctx
+        )
+
+    assert mock_planner_class.return_value.plan.call_count == 2
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_emits_plan_reset_before_second_plan_ready(mock_planner_class: MagicMock):
+    """plan_reset is emitted before the second plan_ready so the UI can clear."""
+    mock_planner_class.return_value.plan.side_effect = [_research_graph(), _simple_graph()]
+    ctx = _pre_clarified_context()
+    create_queue(ctx.task_id)
+
+    def research_and_trigger(*_args):
+        submit_user_message(ctx.task_id, "pivot to WW1")
+        return "findings"
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_and_trigger
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(_steer_client("Restarting.", reuse_plan=False), _config()).run(ctx)
+
+    events = await _drain(ctx.task_id)
+    types = [e.event for e in events]
+    first_plan_idx = types.index("plan_ready")
+    reset_idx = types.index("plan_reset")
+    second_plan_idx = types.index("plan_ready", first_plan_idx + 1)
+    assert reset_idx < second_plan_idx
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_restarts_completed_subtask_not_in_reuse_ids(mock_planner_class: MagicMock):
+    """A completed subtask absent from reuse_subtask_ids is moved back to pending and re-run."""
+    mock_planner_class.return_value.plan.return_value = _research_graph()
+    ctx = _pre_clarified_context()
+    create_queue(ctx.task_id)
+
+    call_count = 0
+
+    def research_trigger_then_run(*_args):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            submit_user_message(ctx.task_id, "actually research WW1 instead")
+        return "findings"
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_trigger_then_run
+        mock_agg.return_value.run.return_value = _agg_result()
+        # reuse_plan=True but reuse_ids=[] → t1 completed but not reused → re-run
+        await Orchestrator(
+            _steer_client("Re-running research for WW1.", reuse_ids=[]), _config()
+        ).run(ctx)
+
+    assert mock_research.return_value.run.call_count == 2
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_restarted_task_emits_agent_restarted_event(mock_planner_class: MagicMock):
+    mock_planner_class.return_value.plan.return_value = _research_graph()
+    ctx = _pre_clarified_context()
+    create_queue(ctx.task_id)
+
+    call_count = 0
+
+    def research_trigger_then_run(*_args):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            submit_user_message(ctx.task_id, "restart research")
+        return "findings"
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_trigger_then_run
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(_steer_client("Re-running.", reuse_ids=[]), _config()).run(ctx)
+
+    events = await _drain(ctx.task_id)
+    restarted = [e for e in events if e.event == "agent_restarted"]
+    assert len(restarted) == 1
+    assert restarted[0].data["subtask_id"] == "t1"
+
+
+@patch("src.orchestrator.Planner")
+async def test_run_keeps_reused_subtask_and_skips_pending(mock_planner_class: MagicMock):
+    """Reused subtask is not re-run; skipped pending subtask is omitted."""
+    mock_planner_class.return_value.plan.return_value = _linear_graph()
+    ctx = _pre_clarified_context()
+    create_queue(ctx.task_id)
+
+    def research_and_trigger(*_args):
+        submit_user_message(ctx.task_id, "keep research, skip summary")
+        return "findings"
+
+    with (
+        patch("src.orchestrator.ResearchAgent") as mock_research,
+        patch("src.orchestrator.SummaryAgent") as mock_summary,
+        patch("src.orchestrator.AggregatorAgent") as mock_agg,
+    ):
+        mock_research.return_value.run.side_effect = research_and_trigger
+        mock_agg.return_value.run.return_value = _agg_result()
+        await Orchestrator(
+            _steer_client("Keeping research, skipping summary.", reuse_ids=["t1"], skip_ids=["t2"]),
+            _config(),
+        ).run(ctx)
+
+    mock_research.return_value.run.assert_called_once()
+    mock_summary.return_value.run.assert_not_called()

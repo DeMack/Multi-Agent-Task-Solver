@@ -21,6 +21,7 @@
 | [ADR-011](#adr-011-web-search-provider) | Web Search Provider | accepted |
 | [ADR-012](#adr-012-chart-output-format) | Chart Output Format | accepted |
 | [ADR-013](#adr-013-linting-formatting--type-checking-toolchain) | Linting, Formatting & Type Checking Toolchain | accepted |
+| [ADR-014](#adr-014-mid-run-steering-s1) | Mid-Run Steering (S1) | accepted |
 
 ---
 
@@ -366,13 +367,66 @@ Ruff is configured with rule sets E, F, I, W, UP (pycodestyle errors/warnings, p
 
 ---
 
+## ADR-014: Mid-Run Steering (S1)
+
+**Status:** accepted
+
+**Context:**
+Stretch goal S1 required users to send messages to the orchestrator while a task is actively running — to redirect, refine, or steer the work in progress. This raised several design questions: how to receive messages without breaking the async execution model, what Claude can actually do in response, and how updated intent flows to restarted work.
+
+**Decision:**
+Four interlocking decisions, each described below.
+
+### 1. Between-batch checking, not true interruption
+
+Mid-run messages are checked between subtask batches in the execution loop — not by interrupting running agents. At the top of each iteration of the `while pending:` loop, `drain_user_messages()` is called. If messages are present, they are handled before the next batch of ready subtasks is dispatched.
+
+**Why not interrupt:** Agents run via `asyncio.to_thread`, which wraps a synchronous call in a thread pool executor. Cancelling the asyncio `Task` marks the future as cancelled, but the underlying thread continues running until the SDK call and any tool invocations complete. True mid-agent interruption is not achievable without either (a) a thread kill signal (unsafe) or (b) converting all agent code to native async (significant refactor). Between-batch is honest about the actual behaviour.
+
+**Trade-off:** A message sent while a long-running agent is active isn't processed until that agent finishes. This is disclosed in the UI acknowledgment, which reflects what work has completed vs. what is still pending at the time the message is handled.
+
+### 2. Restart-with-reuse model
+
+When a steering message arrives, Claude evaluates each completed subtask output — including the plan itself — against the user's new intent and decides what to keep vs. redo.
+
+**Why not skip-only:** The initial implementation only allowed skipping pending subtasks. This was incoherent: a "pivot to WW1" message with skip-only produces stale WW2 research in the outputs, because completed work cannot be undone. The aggregator then synthesizes a degraded result. Treating the plan as just another potentially-reusable output gives a consistent model: anything that no longer serves the new intent is discarded and re-run.
+
+**Response schema from Claude:**
+```json
+{
+  "acknowledgment": "brief honest reply",
+  "reuse_plan": true,
+  "reuse_subtask_ids": ["t1"],
+  "skip_subtask_ids": ["t2"]
+}
+```
+
+- `reuse_plan=false` → discard plan and all outputs, re-plan with accumulated `user_messages`
+- `reuse_subtask_ids` → completed task IDs whose outputs are still useful; everything else is moved back to `pending` and re-run
+- `skip_subtask_ids` → pending task IDs the user explicitly wants to omit
+- The aggregator is always excluded from both lists — it always re-runs because it synthesizes whatever the final outputs are
+
+### 3. `user_messages` accumulation on `TaskContext`
+
+Mid-run messages are appended to `TaskContext.user_messages: list[str]`. This field is included in the prompts of the Planner and all four agent types so that a re-planned or restarted agent receives the updated intent without the orchestrator having to thread it through separately.
+
+This mirrors the `clarifications` pattern from ADR-008 — context that is established once and flows automatically through the pipeline. The distinction: `clarifications` are gathered before planning; `user_messages` accumulate during execution and carry weight only when work is restarted.
+
+### 4. Separate REST endpoint for message input
+
+`POST /task/{id}/message` receives user messages and queues them for the next between-batch drain. The SSE stream remains read-only.
+
+This is consistent with ADR-008/009: bidirectional user input travels via REST endpoints; the SSE stream is strictly server→client. The same argument applies here — keeping SSE read-only avoids multiplexing input and output over one channel and allows a non-browser client to consume events without needing to send on the same connection.
+
+---
+
 ## Stretch Goals Backlog
 
-| # | Goal | Depends on |
-|---|---|---|
-| S1 | Mid-execution live conversation with orchestrator | ADR-008 accepted core first |
-| S2 | Multi-turn refinement (user modifies request after output) | Core flow complete |
-| S3 | ValidationAgent for hallucination checking | Core agents complete |
-| S4 | Configurable search provider (env var / config) | ADR-011 |
-| S5 | Timeout extension — warn user before expiry, allow extension | ADR-010 |
-| S6 | FetchAgent — full-page content retrieval to complement ResearchAgent snippets | ADR-005, ADR-011 |
+| # | Goal | Status | Depends on |
+|---|---|---|---|
+| S1 | Mid-execution live conversation with orchestrator | ✅ Done — see ADR-014 | ADR-008 |
+| S2 | Multi-turn refinement (user modifies request after output) | — | Core flow |
+| S3 | ValidationAgent for hallucination checking | — | Core agents |
+| S4 | Configurable search provider (env var / config) | — | ADR-011 |
+| S5 | Timeout extension — warn user before expiry, allow extension | — | ADR-010 |
+| S6 | FetchAgent — full-page content retrieval to complement ResearchAgent snippets | — | ADR-005, ADR-011 |

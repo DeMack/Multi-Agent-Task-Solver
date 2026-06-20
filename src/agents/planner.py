@@ -86,6 +86,9 @@ class Planner:
         if context.clarifications:
             clarifs = "\n".join(f"- {c}" for c in context.clarifications)
             parts.append(f"Clarifications:\n{clarifs}")
+        if context.user_messages:
+            msgs = "\n".join(f"- {m}" for m in context.user_messages)
+            parts.append(f"Updated direction from user (takes priority):\n{msgs}")
         return "\n\n".join(parts)
 
     @staticmethod

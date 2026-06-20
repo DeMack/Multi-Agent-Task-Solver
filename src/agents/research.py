@@ -113,6 +113,9 @@ class ResearchAgent:
         ]
         if context.clarifications:
             parts.append(f"Clarifications: {'; '.join(context.clarifications)}")
+        if context.user_messages:
+            msgs = "; ".join(context.user_messages)
+            parts.append(f"Updated direction from user (takes priority): {msgs}")
         prior = {k: v for k, v in context.agent_outputs.items() if k in subtask.depends_on}
         if prior:
             parts.append(f"Prior agent outputs:\n{json.dumps(prior, indent=2)}")

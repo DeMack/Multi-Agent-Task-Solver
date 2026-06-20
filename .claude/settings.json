@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{ for f in AGENTS.md PROJECT.md README.md; do [ -f \"$f\" ] && printf '=== %s ===\\n' \"$f\" && cat \"$f\" && echo; done; } | jq -Rs '{hookSpecificOutput: {hookEventName: \"SessionStart\", additionalContext: .}}'",
+            "statusMessage": "Loading project context…"
+          }
+        ]
+      }
+    ]
+  }
+}

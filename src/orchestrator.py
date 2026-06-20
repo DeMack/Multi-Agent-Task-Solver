@@ -1,6 +1,8 @@
 import asyncio
+import json
 import logging
 import re
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,14 +15,55 @@ from src.agents.planner import Planner, PlannerError
 from src.agents.research import ResearchAgent
 from src.agents.summary import SummaryAgent
 from src.config import Config
-from src.events import arm_clarification, close, publish, wait_for_clarification
+from src.events import (
+    arm_clarification,
+    arm_user_messages,
+    close,
+    drain_user_messages,
+    publish,
+    wait_for_clarification,
+)
 from src.models import SSEEvent, SubTask, TaskContext
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class _SteerDirective:
+    acknowledgment: str
+    reuse_plan: bool
+    reuse_subtask_ids: set[str] = field(default_factory=set)
+    skip_subtask_ids: set[str] = field(default_factory=set)
+
+
 class Orchestrator:
     MODEL = "claude-sonnet-4-5"
+    _MESSAGE_SYSTEM = """You are coordinating a multi-agent task pipeline that is currently running.
+A user has sent a mid-run message. You will see the current plan, which subtasks have completed
+(with their outputs), and which are still pending.
+
+Your job is to decide what to reuse vs. redo given the user's new intent.
+
+RESPONSE FIELDS (JSON only — no prose, no markdown fences):
+{
+  "acknowledgment": "brief honest reply (1-2 sentences)",
+  "reuse_plan": true,
+  "reuse_subtask_ids": [],
+  "skip_subtask_ids": []
+}
+
+RULES:
+- reuse_plan: set false if the current plan no longer fits the new intent and a fresh plan
+  is needed. Set true to keep the existing plan and selectively restart/skip subtasks.
+- reuse_subtask_ids: IDs of COMPLETED subtasks whose outputs are still useful.
+  Any completed subtask NOT listed here will be discarded and re-run.
+  Never include the aggregator — it always re-runs when anything changes.
+- skip_subtask_ids: IDs of PENDING subtasks the user explicitly does not want.
+  Only use when the user clearly wants to omit specific work (e.g. "skip the chart").
+  Never include the aggregator.
+- If the user's message doesn't require any change, set reuse_plan=true, list all completed
+  subtask IDs in reuse_subtask_ids, and leave skip_subtask_ids empty."""
+
     _CLARIFICATION_SYSTEM = """You analyze user requests for a multi-agent AI task solver.
 
 If the request has critical missing information that would prevent producing a useful result,
@@ -41,8 +84,15 @@ Most requests should be answered with CLEAR."""
         logger.info("task %s: starting — %r", context.task_id, context.original_request[:80])
         try:
             await self._clarification_phase(context)
-            await self._planning_phase(context)
-            await self._execution_phase(context)
+            while True:
+                await self._planning_phase(context)
+                needs_replan = await self._execution_phase(context)
+                if not needs_replan:
+                    break
+                logger.info("task %s: replanning with updated user intent", context.task_id)
+                await self._emit(context.task_id, "plan_reset", {})
+                context.plan = None
+                context.agent_outputs = {}
         except Exception as exc:
             logger.error("task %s: fatal error — %s", context.task_id, exc)
             await self._emit(context.task_id, "error", {"message": str(exc)})
@@ -118,14 +168,40 @@ Most requests should be answered with CLEAR."""
 
     # --- execution ---
 
-    async def _execution_phase(self, context: TaskContext) -> None:
+    async def _execution_phase(self, context: TaskContext) -> bool:
+        """Run subtasks. Returns True if the caller should re-plan and re-execute."""
         assert context.plan is not None
+        arm_user_messages(context.task_id)
         subtasks = context.plan.subtasks
+        aggregator_ids = {s.id for s in subtasks if s.agent == "aggregator"}
         pending = {s.id for s in subtasks}
         completed: set[str] = set()
         failed: set[str] = set()
 
         while pending:
+            messages = drain_user_messages(context.task_id)
+            if messages:
+                context.user_messages.extend(messages)
+                directive = await self._handle_user_messages(messages, context, pending, completed)
+                if not directive.reuse_plan:
+                    return True
+
+                # Move completed tasks not in reuse_subtask_ids back to pending
+                to_restart = completed - directive.reuse_subtask_ids - aggregator_ids
+                for sid in to_restart:
+                    completed.discard(sid)
+                    pending.add(sid)
+                    del context.agent_outputs[sid]
+                    await self._emit(context.task_id, "agent_restarted", {"subtask_id": sid})
+
+                # Skip explicitly unwanted pending tasks
+                for sid in directive.skip_subtask_ids:
+                    if sid in pending and sid not in aggregator_ids:
+                        pending.discard(sid)
+                        context.agent_outputs[sid] = "SKIPPED: user request"
+                        completed.add(sid)
+                        await self._emit(context.task_id, "agent_skipped", {"subtask_id": sid})
+
             ready = [
                 s
                 for s in subtasks
@@ -161,6 +237,8 @@ Most requests should be answered with CLEAR."""
             output = context.agent_outputs[aggregator_subtask.id]
             if isinstance(output, dict):
                 await self._emit(context.task_id, "result_ready", {"result": output})
+
+        return False
 
     async def _run_subtask(self, subtask: SubTask, context: TaskContext) -> Any:
         await self._emit(
@@ -247,6 +325,81 @@ Most requests should be answered with CLEAR."""
             },
         )
         raise last_exc
+
+    async def _handle_user_messages(
+        self,
+        messages: list[str],
+        context: TaskContext,
+        pending: set[str],
+        completed: set[str],
+    ) -> _SteerDirective:
+        assert context.plan is not None
+        lines = [f"Original request: {context.original_request}", ""]
+
+        done = [s for s in context.plan.subtasks if s.id in completed]
+        lines.append("Completed subtasks (with outputs):")
+        if done:
+            for s in done:
+                output = context.agent_outputs.get(s.id, "(no output)")
+                preview = str(output)[:200]
+                lines.append(f"  {s.id} ({s.agent}): {s.description}")
+                lines.append(f"    output: {preview}")
+        else:
+            lines.append("  (none yet)")
+
+        lines.append("")
+        remaining = [s for s in context.plan.subtasks if s.id in pending]
+        lines.append("Pending subtasks (not yet run):")
+        if remaining:
+            lines.extend(f"  {s.id} ({s.agent}): {s.description}" for s in remaining)
+        else:
+            lines.append("  (none)")
+
+        lines += ["", "User message(s):"]
+        lines.extend(f"  - {m}" for m in messages)
+
+        response = await asyncio.to_thread(
+            self.client.messages.create,
+            model=self.MODEL,
+            max_tokens=512,
+            system=self._MESSAGE_SYSTEM,
+            messages=[{"role": "user", "content": "\n".join(lines)}],
+        )
+        text = next((b.text for b in response.content if b.type == "text"), "{}")
+
+        acknowledgment = "Got it — continuing as planned."
+        reuse_plan = True
+        reuse_ids: set[str] = set(completed)
+        skip_ids: set[str] = set()
+        try:
+            clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
+            parsed = json.loads(clean)
+            acknowledgment = parsed.get("acknowledgment", acknowledgment)
+            reuse_plan = bool(parsed.get("reuse_plan", True))
+            reuse_ids = {sid for sid in parsed.get("reuse_subtask_ids", []) if sid in completed}
+            skip_ids = {sid for sid in parsed.get("skip_subtask_ids", []) if sid in pending}
+        except (json.JSONDecodeError, AttributeError):
+            logger.warning("task %s: failed to parse message response: %r", context.task_id, text)
+
+        directive = _SteerDirective(
+            acknowledgment=acknowledgment,
+            reuse_plan=reuse_plan,
+            reuse_subtask_ids=reuse_ids,
+            skip_subtask_ids=skip_ids,
+        )
+
+        restarted = list(completed - reuse_ids) if reuse_plan else []
+        await self._emit(
+            context.task_id,
+            "user_message_ack",
+            {
+                "acknowledgment": acknowledgment,
+                "reuse_plan": reuse_plan,
+                "restarted_subtask_ids": restarted,
+                "skipped_subtask_ids": list(skip_ids),
+            },
+        )
+        return directive
 
     async def _dispatch(self, subtask: SubTask, context: TaskContext) -> Any:
         match subtask.agent:

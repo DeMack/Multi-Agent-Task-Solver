@@ -11,13 +11,15 @@ from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 from src.config import config
-from src.events import cleanup, create_queue, get_queue, submit_clarification
+from src.events import cleanup, create_queue, get_queue, submit_clarification, submit_user_message
 from src.models import (
     ClarifyRequest,
     ClarifyResponse,
     CreateTaskRequest,
     CreateTaskResponse,
     TaskContext,
+    UserMessageRequest,
+    UserMessageResponse,
 )
 from src.orchestrator import Orchestrator
 
@@ -70,6 +72,15 @@ async def create_task(body: CreateTaskRequest) -> CreateTaskResponse:
 async def clarify_task(task_id: str, body: ClarifyRequest) -> ClarifyResponse:
     submit_clarification(task_id, body.answers)
     return ClarifyResponse(task_id=task_id, status="resumed")
+
+
+@app.post("/task/{task_id}/message", response_model=UserMessageResponse)
+async def message_task(task_id: str, body: UserMessageRequest) -> UserMessageResponse:
+    if get_queue(task_id) is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not submit_user_message(task_id, body.message):
+        raise HTTPException(status_code=409, detail="Task is not accepting messages yet")
+    return UserMessageResponse(task_id=task_id, status="received")
 
 
 @app.get("/task/{task_id}/stream")

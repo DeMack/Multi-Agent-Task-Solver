@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.events as events_mod
-from src.events import create_queue, get_queue, publish
+from src.events import arm_user_messages, create_queue, get_queue, publish
 from src.main import app
 from src.models import SSEEvent
 
@@ -158,10 +158,45 @@ def test_root_serves_html():
 
 def test_root_contains_request_form():
     response = client.get("/")
-    assert b"request-input" in response.content
-    assert b"submit-btn" in response.content
+    assert b"appendInputCard" in response.content
+    assert b"Solve" in response.content
 
 
 def test_root_contains_sse_listener():
     response = client.get("/")
     assert b"EventSource" in response.content
+
+
+# --- S1: mid-run user messages ---
+
+
+def test_message_route_returns_404_for_unknown_task():
+    response = client.post("/task/nonexistent/message", json={"message": "hello"})
+    assert response.status_code == 404
+
+
+def test_message_route_returns_409_when_not_yet_accepting():
+    create_queue("not-yet-running")
+    response = client.post("/task/not-yet-running/message", json={"message": "hello"})
+    assert response.status_code == 409
+
+
+def test_message_route_returns_received_when_armed():
+    task_id = "accepting-task"
+    create_queue(task_id)
+    arm_user_messages(task_id)
+    response = client.post(f"/task/{task_id}/message", json={"message": "skip the chart"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "received"
+
+
+def test_message_route_calls_submit_user_message():
+    create_queue("msg-task")
+    with patch("src.main.submit_user_message", return_value=True) as mock_submit:
+        client.post("/task/msg-task/message", json={"message": "skip the chart"})
+    mock_submit.assert_called_once_with("msg-task", "skip the chart")
+
+
+def test_message_route_rejects_missing_message_field():
+    response = client.post("/task/some-id/message", json={})
+    assert response.status_code == 422
