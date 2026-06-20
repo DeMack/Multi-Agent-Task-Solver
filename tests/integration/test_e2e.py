@@ -128,7 +128,6 @@ async def test_handle_user_message_calls_claude_and_returns_ack():
         completed={"t1"},
     )
 
-    # Drain SSE queue to find the ack event
     q = get_queue(task_id)
     assert q is not None
     events = []
@@ -139,15 +138,6 @@ async def test_handle_user_message_calls_claude_and_returns_ack():
 
     assert isinstance(directive.acknowledgment, str)
     assert len(directive.acknowledgment) > 0
-
-    # Drain SSE queue to find the ack event
-    q = get_queue(task_id)
-    assert q is not None
-    events = []
-    while not q.empty():
-        item = await q.get()
-        if item is not None:
-            events.append(item)
 
     ack_events = [e for e in events if e.event == "user_message_ack"]
     assert len(ack_events) == 1, f"Expected 1 user_message_ack, got: {[e.event for e in events]}"
